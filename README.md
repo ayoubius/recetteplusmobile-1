@@ -1,30 +1,16 @@
-# Projet Next.js
+# myapp
 
-*Automatically synced with your [v0.dev](https://v0.dev) deployments*
+A new Flutter project.
 
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/vercelus4/v0-projet-next-js)
-[![Built with v0](https://img.shields.io/badge/Built%20with-v0.dev-black?style=for-the-badge)](https://v0.dev/chat/projects/UPZd8XqvVcb)
+## Getting Started
 
-## Overview
+This project is a starting point for a Flutter application.
 
-This repository will stay in sync with your deployed chats on [v0.dev](https://v0.dev).
-Any changes you make to your deployed app will be automatically pushed to this repository from [v0.dev](https://v0.dev).
+A few resources to get you started if this is your first Flutter project:
 
-## Deployment
+- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
 
-Your project is live at:
-
-**[https://vercel.com/vercelus4/v0-projet-next-js](https://vercel.com/vercelus4/v0-projet-next-js)**
-
-## Build your app
-
-Continue building your app on:
-
-**[https://v0.dev/chat/projects/UPZd8XqvVcb](https://v0.dev/chat/projects/UPZd8XqvVcb)**
-
-## How It Works
-
-1. Create and modify your project using [v0.dev](https://v0.dev)
-2. Deploy your chats from the v0 interface
-3. Changes are automatically pushed to this repository
-4. Vercel deploys the latest version from this repository
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.
