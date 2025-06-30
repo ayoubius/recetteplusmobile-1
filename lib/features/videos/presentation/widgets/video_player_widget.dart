@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/services/video_service.dart';
 import 'dart:async';
 
 class VideoPlayerWidget extends StatefulWidget {
@@ -31,6 +32,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
   bool _isPlaying = false;
   bool _isPreloaded = false;
   bool _isBuffering = false;
+  String? _errorMessage;
 
   // Animation pour les contrôles
   late AnimationController _controlsAnimationController;
@@ -92,26 +94,46 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (_isInitialized || _hasError) return;
 
     try {
-      final videoUrl = widget.video['video_url'];
+      final videoUrl = widget.video['video_url'] as String?;
+      
       if (videoUrl == null || videoUrl.isEmpty) {
         setState(() {
           _hasError = true;
+          _errorMessage = 'URL de la vidéo manquante';
         });
         return;
       }
+
+      // Vérifier si l'URL est accessible avant d'initialiser le lecteur
+      print('Vérification de l\'URL vidéo: $videoUrl');
+      
+      // Pour le développement, on peut désactiver cette vérification
+      // final isAccessible = await VideoService.isVideoUrlAccessible(videoUrl);
+      // if (!isAccessible) {
+      //   setState(() {
+      //     _hasError = true;
+      //     _errorMessage = 'Vidéo non accessible (404)';
+      //   });
+      //   return;
+      // }
 
       _controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
 
       // Écouter les changements d'état avant l'initialisation
       _controller!.addListener(_onVideoStateChanged);
 
+      print('Initialisation du lecteur vidéo...');
       await _controller!.initialize();
 
       if (mounted) {
         setState(() {
           _isInitialized = true;
           _isPreloaded = true;
+          _hasError = false;
+          _errorMessage = null;
         });
+
+        print('Lecteur vidéo initialisé avec succès');
 
         // Configuration du player
         _controller!.setLooping(true);
@@ -123,9 +145,11 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
         }
       }
     } catch (e) {
+      print('Erreur lors de l\'initialisation de la vidéo: $e');
       if (mounted) {
         setState(() {
           _hasError = true;
+          _errorMessage = 'Erreur de chargement: ${e.toString()}';
         });
       }
     }
@@ -154,8 +178,10 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     // Gérer les erreurs de lecture
     if (value.hasError) {
+      print('Erreur du lecteur vidéo: ${value.errorDescription}');
       setState(() {
         _hasError = true;
+        _errorMessage = value.errorDescription ?? 'Erreur de lecture';
       });
     }
   }
@@ -222,6 +248,11 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   void _onTap() {
+    if (_hasError) {
+      _retryInitialization();
+      return;
+    }
+    
     _togglePlayPause();
     _showControlsTemporarily();
   }
@@ -234,6 +265,20 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   void _showLikeAnimation() {
     // TODO: Implémenter l'animation de like
+  }
+
+  void _retryInitialization() {
+    setState(() {
+      _hasError = false;
+      _isInitialized = false;
+      _isPreloaded = false;
+      _errorMessage = null;
+    });
+    
+    _controller?.dispose();
+    _controller = null;
+    
+    _initializeVideo();
   }
 
   void _seekTo(Duration position) {
@@ -286,8 +331,8 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
         children: [
           _buildVideoPlayer(),
           _buildOverlay(),
-          if (_showControls) _buildPlaybackControls(),
-          if (_isBuffering) _buildBufferingIndicator(),
+          if (_showControls && !_hasError) _buildPlaybackControls(),
+          if (_isBuffering && !_hasError) _buildBufferingIndicator(),
         ],
       ),
     );
@@ -296,35 +341,55 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Widget _buildVideoPlayer() {
     if (_hasError) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Erreur de lecture',
-              style: TextStyle(
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 64,
                 color: Colors.grey[400],
-                fontSize: 16,
               ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  _hasError = false;
-                  _isInitialized = false;
-                  _isPreloaded = false;
-                });
-                _initializeVideo();
-              },
-              child: const Text('Réessayer'),
-            ),
-          ],
+              const SizedBox(height: 16),
+              Text(
+                'Erreur de lecture',
+                style: TextStyle(
+                  color: Colors.grey[400],
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (_errorMessage != null)
+                Text(
+                  _errorMessage!,
+                  style: TextStyle(
+                    color: Colors.grey[500],
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _retryInitialization,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Réessayer'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Tapez pour réessayer',
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -339,11 +404,22 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
             ),
             const SizedBox(height: 16),
             Text(
-              'Chargement...',
+              'Chargement de la vidéo...',
               style: TextStyle(
                 color: Colors.grey[400],
                 fontSize: 14,
               ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              widget.video['title'] ?? 'Vidéo',
+              style: TextStyle(
+                color: Colors.grey[500],
+                fontSize: 12,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -399,9 +475,9 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         ),
                         const SizedBox(height: 8),
                         if (widget.video['description'] != null &&
-                            widget.video['description'].isNotEmpty)
+                            widget.video['description'].toString().isNotEmpty)
                           Text(
-                            widget.video['description'],
+                            widget.video['description'].toString(),
                             style: TextStyle(
                               color: Colors.grey[300],
                               fontSize: 14,
@@ -423,7 +499,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
-                                  widget.video['category'],
+                                  widget.video['category'].toString(),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12,
