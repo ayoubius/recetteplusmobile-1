@@ -35,7 +35,7 @@ Ce document décrit les améliorations apportées au système de gestion des vid
 - **Configuration flexible** : Activation/désactivation des fonctionnalités
 
 #### Configuration :
-```dart
+\`\`\`dart
 // Activer/désactiver le cache
 VideoService.enableCache = true;
 
@@ -47,7 +47,7 @@ VideoService.timeout = Duration(seconds: 10);
 
 // Activer les métriques
 VideoService.enableMetrics = true;
-```
+\`\`\`
 
 ### 3. Service de Métriques (`VideoMetricsService`)
 
@@ -87,35 +87,35 @@ VideoService.enableMetrics = true;
 ## Architecture Améliorée
 
 ### Avant :
-```
+\`\`\`
 VideosPage
 ├── VideoPlayerWidget (état local)
 ├── VideoPlayerWidget (état local)
 └── VideoPlayerWidget (état local)
-```
+\`\`\`
 
 ### Après :
-```
+\`\`\`
 VideosPage
 ├── VideoStateManager (état centralisé)
 ├── VideoMetricsService (métriques)
 ├── EnhancedVideoPlayerWidget
 ├── EnhancedVideoPlayerWidget
 └── EnhancedVideoPlayerWidget
-```
+\`\`\`
 
 ## Configuration et Utilisation
 
 ### Initialisation
 
-```dart
+\`\`\`dart
 // Dans main.dart ou au démarrage de l'app
 await VideoMetricsService().initialize();
-```
+\`\`\`
 
 ### Utilisation du Widget Amélioré
 
-```dart
+\`\`\`dart
 EnhancedVideoPlayerWidget(
   video: videoData,
   isActive: isActive,
@@ -125,11 +125,11 @@ EnhancedVideoPlayerWidget(
   onRecipePressed: () => openRecipe(),
   onVideoError: () => handleError(),
 )
-```
+\`\`\`
 
 ### Accès aux Métriques
 
-```dart
+\`\`\`dart
 // Obtenir les statistiques globales
 final stats = VideoMetricsService().getGlobalStats();
 
@@ -138,7 +138,7 @@ final metrics = VideoMetricsService().getMetrics(videoId);
 
 // Obtenir les métriques de session
 final session = VideoMetricsService().getSessionMetrics();
-```
+\`\`\`
 
 ## Gestion de la Mémoire
 
@@ -184,13 +184,13 @@ final session = VideoMetricsService().getSessionMetrics();
    - Bitrate moyen
 
 ### Export des Données
-```dart
+\`\`\`dart
 // Exporter toutes les métriques
 final allMetrics = VideoMetricsService().getAllMetrics();
 
 // Exporter les statistiques globales
 final globalStats = VideoMetricsService().getGlobalStats();
-```
+\`\`\`
 
 ## Migration depuis l'Ancien Système
 
@@ -203,7 +203,7 @@ final globalStats = VideoMetricsService().getGlobalStats();
 
 ### Code de Migration
 
-```dart
+\`\`\`dart
 // Avant
 VideoPlayerWidget(
   video: video,
@@ -218,7 +218,7 @@ EnhancedVideoPlayerWidget(
   autoPlay: true,
   onVideoError: () => handleError(),
 )
-```
+\`\`\`
 
 ## Performance
 
@@ -237,7 +237,7 @@ EnhancedVideoPlayerWidget(
 ## Maintenance
 
 ### Nettoyage Régulier
-```dart
+\`\`\`dart
 // Nettoyer le cache vidéo
 VideoService.clearExpiredCache();
 
@@ -246,7 +246,7 @@ VideoMetricsService().resetSession();
 
 // Effacer toutes les métriques
 await VideoMetricsService().clearAllMetrics();
-```
+\`\`\`
 
 ### Monitoring
 - Surveiller les métriques de performance
@@ -262,4 +262,4 @@ Ces améliorations apportent :
 - **Maintenabilité** : Architecture centralisée
 - **Expérience utilisateur** : Interface plus fluide
 
-Le système est maintenant prêt pour une utilisation en production avec un monitoring complet des performances. 
+Le système est maintenant prêt pour une utilisation en production avec un monitoring complet des performances.

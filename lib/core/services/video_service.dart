@@ -111,15 +111,17 @@ class VideoService {
     int offset = 0,
   }) async {
     try {
-      var query = SupabaseService.client.from('videos').select();
-      if (category != null && category.isNotEmpty && category != 'Tous') {
-        query = query.eq('category', category);
-      }
-      final response = await query
-          .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1);
-      final videos = List<Map<String, dynamic>>.from(response);
-      return videos.map(_processVideoData).toList();
+      final response = await SupabaseService.select(
+        'videos',
+        columns: '*',
+        filters: category != null && category != 'Tous' ? {'category': category} : null,
+        orderBy: 'created_at',
+        ascending: false,
+        limit: limit,
+        offset: offset,
+      );
+
+      return response;
     } catch (e) {
       print('❌ Erreur récupération vidéos Supabase: $e');
       return [];
