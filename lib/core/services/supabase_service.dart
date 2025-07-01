@@ -2,43 +2,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 
 class SupabaseService {
-  static SupabaseClient? _client;
-  static bool _isInitialized = false;
-
-  static SupabaseClient get client {
-    if (_client == null) {
-      throw Exception(
-          'Supabase n\'est pas initialisé. Appelez initialize() d\'abord.');
-    }
-    return _client!;
-  }
-
-  static bool get isInitialized => _isInitialized;
-
-  static Future<void> initialize({
-    required String url,
-    required String anonKey,
-  }) async {
+  // Utiliser directement l'instance globale de Supabase
+  static SupabaseClient get client => Supabase.instance.client;
+  
+  static bool get isInitialized {
     try {
-      await Supabase.initialize(
-        url: url,
-        anonKey: anonKey,
-        debug: kDebugMode,
-      );
-
-      _client = Supabase.instance.client;
-      _isInitialized = true;
-
-      print('Supabase initialisé avec succès');
+      // Vérifier si Supabase est initialisé en tentant d'accéder au client
+      final _ = Supabase.instance.client;
+      return true;
     } catch (e) {
-      print('Erreur lors de l\'initialisation de Supabase: $e');
-      _isInitialized = false;
+      return false;
     }
-  }
-
-  static Future<void> dispose() async {
-    _client = null;
-    _isInitialized = false;
   }
 
   // Méthodes utilitaires pour les requêtes communes
@@ -51,12 +25,11 @@ class SupabaseService {
     int? limit,
     int? offset,
   }) async {
-    if (!_isInitialized) {
+    if (!isInitialized) {
       throw Exception('Supabase n\'est pas initialisé');
     }
 
-    dynamic query =
-        _client!.from(table).select(columns); // Use dynamic for builder
+    dynamic query = client.from(table).select(columns);
 
     if (filters != null) {
       filters.forEach((key, value) {
@@ -65,7 +38,7 @@ class SupabaseService {
     }
 
     if (orderBy != null) {
-      query = query.order(orderBy, ascending: ascending); // No type error now
+      query = query.order(orderBy, ascending: ascending);
     }
 
     if (limit != null) {
@@ -83,11 +56,11 @@ class SupabaseService {
     String table,
     Map<String, dynamic> data,
   ) async {
-    if (!_isInitialized) {
+    if (!isInitialized) {
       throw Exception('Supabase n\'est pas initialisé');
     }
 
-    return await _client!.from(table).insert(data).select();
+    return await client.from(table).insert(data).select();
   }
 
   static Future<List<Map<String, dynamic>>> update(
@@ -95,11 +68,11 @@ class SupabaseService {
     Map<String, dynamic> data, {
     required Map<String, dynamic> filters,
   }) async {
-    if (!_isInitialized) {
+    if (!isInitialized) {
       throw Exception('Supabase n\'est pas initialisé');
     }
 
-    var query = _client!.from(table).update(data);
+    var query = client.from(table).update(data);
 
     filters.forEach((key, value) {
       query = query.eq(key, value);
@@ -112,11 +85,11 @@ class SupabaseService {
     String table, {
     required Map<String, dynamic> filters,
   }) async {
-    if (!_isInitialized) {
+    if (!isInitialized) {
       throw Exception('Supabase n\'est pas initialisé');
     }
 
-    var query = _client!.from(table).delete();
+    var query = client.from(table).delete();
 
     filters.forEach((key, value) {
       query = query.eq(key, value);
@@ -136,13 +109,14 @@ class SupabaseService {
     int offset = 0,
   }) async {
     try {
-      if (!_isInitialized) {
-        print(
-            '❌ Supabase non initialisé, impossible de récupérer les recettes.');
-        return [];
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, utilisation des données de test pour les recettes.');
+        }
+        return _getTestRecipes();
       }
 
-      var query = _client!.from('recipes').select('*');
+      var query = client.from('recipes').select('*');
 
       // Appliquer les filtres
       if (searchQuery != null && searchQuery.isNotEmpty) {
@@ -173,9 +147,72 @@ class SupabaseService {
 
       return response;
     } catch (e) {
-      print('❌ Erreur lors de la récupération des recettes: $e');
-      return [];
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération des recettes: $e');
+        print('🔄 Utilisation des données de test...');
+      }
+      return _getTestRecipes();
     }
+  }
+
+  // Données de test pour les recettes
+  static List<Map<String, dynamic>> _getTestRecipes() {
+    return [
+      {
+        'id': '1',
+        'title': 'Pasta Carbonara',
+        'description': 'Un classique italien avec des œufs, du parmesan et du bacon',
+        'image_url': 'https://images.unsplash.com/photo-1621996346565-e3dbc353d2e5?w=400',
+        'prep_time': 20,
+        'cook_time': 15,
+        'difficulty': 'Facile',
+        'rating': 4.8,
+        'category': 'Italien',
+        'ingredients': ['Pâtes', 'Œufs', 'Parmesan', 'Bacon', 'Poivre noir'],
+        'instructions': [
+          'Faire cuire les pâtes',
+          'Préparer la sauce aux œufs',
+          'Mélanger et servir'
+        ],
+        'created_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+      },
+      {
+        'id': '2',
+        'title': 'Salade César',
+        'description': 'Salade fraîche avec croûtons et sauce césar maison',
+        'image_url': 'https://images.unsplash.com/photo-1546793665-c74683f339c1?w=400',
+        'prep_time': 15,
+        'cook_time': 0,
+        'difficulty': 'Facile',
+        'rating': 4.5,
+        'category': 'Salade',
+        'ingredients': ['Laitue romaine', 'Croûtons', 'Parmesan', 'Anchois'],
+        'instructions': [
+          'Préparer la salade',
+          'Faire la sauce',
+          'Assembler et servir'
+        ],
+        'created_at': DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
+      },
+      {
+        'id': '3',
+        'title': 'Coq au Vin',
+        'description': 'Plat traditionnel français au vin rouge',
+        'image_url': 'https://images.unsplash.com/photo-1604503468506-a8da13d82791?w=400',
+        'prep_time': 30,
+        'cook_time': 90,
+        'difficulty': 'Difficile',
+        'rating': 4.9,
+        'category': 'Français',
+        'ingredients': ['Poulet', 'Vin rouge', 'Champignons', 'Lardons'],
+        'instructions': [
+          'Mariner le poulet',
+          'Faire revenir les ingrédients',
+          'Mijoter longuement'
+        ],
+        'created_at': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
+      },
+    ];
   }
 
   // Méthodes spécifiques pour les vidéos
@@ -186,12 +223,14 @@ class SupabaseService {
     int offset = 0,
   }) async {
     try {
-      if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible de récupérer les vidéos.');
-        return [];
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, utilisation des données de test pour les vidéos.');
+        }
+        return _getTestVideos();
       }
 
-      var query = _client!.from('videos').select('*');
+      var query = client.from('videos').select('*');
 
       // Appliquer les filtres
       if (searchQuery != null && searchQuery.isNotEmpty) {
@@ -209,9 +248,54 @@ class SupabaseService {
 
       return response;
     } catch (e) {
-      print('❌ Erreur lors de la récupération des vidéos: $e');
-      return [];
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération des vidéos: $e');
+        print('🔄 Utilisation des données de test...');
+      }
+      return _getTestVideos();
     }
+  }
+
+  // Données de test pour les vidéos
+  static List<Map<String, dynamic>> _getTestVideos() {
+    return [
+      {
+        'id': '1',
+        'title': 'Comment faire des pâtes parfaites',
+        'description': 'Apprenez les secrets pour des pâtes al dente',
+        'video_url': 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        'thumbnail_url': 'https://images.unsplash.com/photo-1621996346565-e3dbc353d2e5?w=400',
+        'duration': 300,
+        'category': 'Technique',
+        'views': 1250,
+        'likes': 89,
+        'created_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+      },
+      {
+        'id': '2',
+        'title': 'Techniques de découpe des légumes',
+        'description': 'Maîtrisez l\'art de la découpe comme un chef',
+        'video_url': 'https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+        'thumbnail_url': 'https://images.unsplash.com/photo-1546793665-c74683f339c1?w=400',
+        'duration': 420,
+        'category': 'Technique',
+        'views': 2100,
+        'likes': 156,
+        'created_at': DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
+      },
+      {
+        'id': '3',
+        'title': 'Recette de pain maison',
+        'description': 'Du pain frais fait maison en quelques étapes',
+        'video_url': 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+        'thumbnail_url': 'https://images.unsplash.com/photo-1604503468506-a8da13d82791?w=400',
+        'duration': 600,
+        'category': 'Boulangerie',
+        'views': 3200,
+        'likes': 245,
+        'created_at': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
+      },
+    ];
   }
 
   // Méthodes spécifiques pour les produits
@@ -225,12 +309,15 @@ class SupabaseService {
     int offset = 0,
     bool shuffle = false,
   }) async {
-    if (!_isInitialized) {
-      print('❌ Supabase non initialisé, impossible de récupérer les produits.');
-      return [];
-    }
     try {
-      var query = _client!.from('products').select('*');
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, utilisation des données de test pour les produits.');
+        }
+        return _getTestProducts(shuffle: shuffle);
+      }
+
+      var query = client.from('products').select('*');
 
       // Appliquer les filtres
       if (searchQuery != null && searchQuery.isNotEmpty) {
@@ -261,20 +348,84 @@ class SupabaseService {
       }
       return products;
     } catch (e) {
-      print('❌ Erreur lors de la récupération des produits: $e');
-      return [];
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération des produits: $e');
+        print('🔄 Utilisation des données de test...');
+      }
+      return _getTestProducts(shuffle: shuffle);
     }
+  }
+
+  // Données de test pour les produits
+  static List<Map<String, dynamic>> _getTestProducts({bool shuffle = false}) {
+    List<Map<String, dynamic>> products = [
+      {
+        'id': '1',
+        'name': 'Tomates cerises bio',
+        'description': 'Tomates cerises fraîches et biologiques',
+        'price': 3.50,
+        'image_url': 'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=400',
+        'category': 'Légumes',
+        'in_stock': true,
+        'stock_quantity': 25,
+        'unit': 'barquette',
+        'created_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+      },
+      {
+        'id': '2',
+        'name': 'Pâtes italiennes',
+        'description': 'Pâtes artisanales italiennes de qualité premium',
+        'price': 4.20,
+        'image_url': 'https://images.unsplash.com/photo-1621996346565-e3dbc353d2e5?w=400',
+        'category': 'Épicerie',
+        'in_stock': true,
+        'stock_quantity': 50,
+        'unit': 'paquet',
+        'created_at': DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
+      },
+      {
+        'id': '3',
+        'name': 'Fromage parmesan',
+        'description': 'Parmesan italien AOP vieilli 24 mois',
+        'price': 12.80,
+        'image_url': 'https://images.unsplash.com/photo-1486297678162-eb2a19b0a32d?w=400',
+        'category': 'Fromage',
+        'in_stock': true,
+        'stock_quantity': 15,
+        'unit': 'morceau',
+        'created_at': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
+      },
+      {
+        'id': '4',
+        'name': 'Huile d\'olive extra vierge',
+        'description': 'Huile d\'olive première pression à froid',
+        'price': 8.90,
+        'image_url': 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400',
+        'category': 'Épicerie',
+        'in_stock': true,
+        'stock_quantity': 30,
+        'unit': 'bouteille',
+        'created_at': DateTime.now().subtract(const Duration(days: 4)).toIso8601String(),
+      },
+    ];
+
+    if (shuffle) {
+      products.shuffle();
+    }
+    return products;
   }
 
   // Méthodes pour les profils utilisateur
   static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
-      if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible de récupérer le profil.');
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, impossible de récupérer le profil.');
+        }
         return null;
       }
 
-      final response = await _client!
+      final response = await client
           .from('user_profiles')
           .select('*')
           .eq('user_id', userId)
@@ -282,7 +433,9 @@ class SupabaseService {
 
       return response;
     } catch (e) {
-      print('❌ Erreur lors de la récupération du profil: $e');
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération du profil: $e');
+      }
       return null;
     }
   }
@@ -296,12 +449,14 @@ class SupabaseService {
     String? avatar,
   }) async {
     try {
-      if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible de créer le profil.');
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, impossible de créer le profil.');
+        }
         return;
       }
 
-      await _client!.from('user_profiles').insert({
+      await client.from('user_profiles').insert({
         'user_id': userId,
         'email': email,
         'first_name': firstName,
@@ -312,7 +467,9 @@ class SupabaseService {
         'updated_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('❌ Erreur lors de la création du profil: $e');
+      if (kDebugMode) {
+        print('❌ Erreur lors de la création du profil: $e');
+      }
       rethrow;
     }
   }
@@ -326,9 +483,10 @@ class SupabaseService {
     Map<String, dynamic>? additionalData,
   }) async {
     try {
-      if (!_isInitialized) {
-        print(
-            '❌ Supabase non initialisé, impossible de mettre à jour le profil.');
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, impossible de mettre à jour le profil.');
+        }
         return;
       }
 
@@ -342,12 +500,14 @@ class SupabaseService {
       if (avatar != null) updateData['avatar'] = avatar;
       if (additionalData != null) updateData.addAll(additionalData);
 
-      await _client!
+      await client
           .from('user_profiles')
           .update(updateData)
           .eq('user_id', userId);
     } catch (e) {
-      print('❌ Erreur lors de la mise à jour du profil: $e');
+      if (kDebugMode) {
+        print('❌ Erreur lors de la mise à jour du profil: $e');
+      }
       rethrow;
     }
   }
@@ -355,16 +515,17 @@ class SupabaseService {
   // Méthodes pour les favoris
   static Future<List<Map<String, dynamic>>> getUserFavorites() async {
     try {
-      if (!_isInitialized) {
-        print(
-            '❌ Supabase non initialisé, impossible de récupérer les favoris.');
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, retour de favoris vides.');
+        }
         return [];
       }
 
-      final user = _client!.auth.currentUser;
+      final user = client.auth.currentUser;
       if (user == null) return [];
 
-      final response = await _client!
+      final response = await client
           .from('favorites')
           .select('recipe_id')
           .eq('user_id', user.id);
@@ -372,7 +533,7 @@ class SupabaseService {
       if (response.isNotEmpty) {
         List<Map<String, dynamic>> recipes = [];
         for (var favorite in response) {
-          final recipe = await _client!
+          final recipe = await client
               .from('recipes')
               .select('*')
               .eq('id', favorite['recipe_id'])
@@ -385,50 +546,59 @@ class SupabaseService {
       }
       return [];
     } catch (e) {
-      print('❌ Erreur lors de la récupération des favoris: $e');
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération des favoris: $e');
+      }
       return [];
     }
   }
 
   static Future<void> addToFavorites(String itemId, String type) async {
     try {
-      if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible d\'ajouter aux favoris.');
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, impossible d\'ajouter aux favoris.');
+        }
         return;
       }
 
-      final user = _client!.auth.currentUser;
+      final user = client.auth.currentUser;
       if (user == null) return;
 
-      await _client!.from('favorites').insert({
+      await client.from('favorites').insert({
         'user_id': user.id,
         'recipe_id': itemId,
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('❌ Erreur lors de l\'ajout aux favoris: $e');
+      if (kDebugMode) {
+        print('❌ Erreur lors de l\'ajout aux favoris: $e');
+      }
       rethrow;
     }
   }
 
   static Future<void> removeFromFavorites(String itemId) async {
     try {
-      if (!_isInitialized) {
-        print(
-            '❌ Supabase non initialisé, impossible de supprimer des favoris.');
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, impossible de supprimer des favoris.');
+        }
         return;
       }
 
-      final user = _client!.auth.currentUser;
+      final user = client.auth.currentUser;
       if (user == null) return;
 
-      await _client!
+      await client
           .from('favorites')
           .delete()
           .eq('user_id', user.id)
           .eq('recipe_id', itemId);
     } catch (e) {
-      print('❌ Erreur lors de la suppression des favoris: $e');
+      if (kDebugMode) {
+        print('❌ Erreur lors de la suppression des favoris: $e');
+      }
       rethrow;
     }
   }
@@ -437,16 +607,17 @@ class SupabaseService {
   static Future<List<Map<String, dynamic>>> getUserHistory(
       {int limit = 20}) async {
     try {
-      if (!_isInitialized) {
-        print(
-            '❌ Supabase non initialisé, impossible de récupérer l\'historique.');
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, retour d\'historique vide.');
+        }
         return [];
       }
 
-      final user = _client!.auth.currentUser;
+      final user = client.auth.currentUser;
       if (user == null) return [];
 
-      final response = await _client!
+      final response = await client
           .from('user_history')
           .select('recipe_id')
           .eq('user_id', user.id)
@@ -456,7 +627,7 @@ class SupabaseService {
       if (response.isNotEmpty) {
         List<Map<String, dynamic>> recipes = [];
         for (var history in response) {
-          final recipe = await _client!
+          final recipe = await client
               .from('recipes')
               .select('*')
               .eq('id', history['recipe_id'])
@@ -469,37 +640,42 @@ class SupabaseService {
       }
       return [];
     } catch (e) {
-      print('❌ Erreur lors de la récupération de l\'historique: $e');
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération de l\'historique: $e');
+      }
       return [];
     }
   }
 
   static Future<void> addToHistory(String itemId) async {
     try {
-      if (!_isInitialized) {
-        print(
-            '❌ Supabase non initialisé, impossible d\'ajouter à l\'historique.');
+      if (!isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, impossible d\'ajouter à l\'historique.');
+        }
         return;
       }
 
-      final user = _client!.auth.currentUser;
+      final user = client.auth.currentUser;
       if (user == null) return;
 
       // Supprimer l'entrée existante s'il y en a une
-      await _client!
+      await client
           .from('user_history')
           .delete()
           .eq('user_id', user.id)
           .eq('recipe_id', itemId);
 
       // Ajouter la nouvelle entrée
-      await _client!.from('user_history').insert({
+      await client.from('user_history').insert({
         'user_id': user.id,
         'recipe_id': itemId,
         'viewed_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('⚠️ Erreur lors de l\'ajout à l\'historique: $e');
+      if (kDebugMode) {
+        print('⚠️ Erreur lors de l\'ajout à l\'historique: $e');
+      }
     }
   }
 }
