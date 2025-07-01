@@ -55,7 +55,8 @@ class SupabaseService {
       throw Exception('Supabase n\'est pas initialisé');
     }
 
-    var query = _client!.from(table).select(columns);
+    dynamic query =
+        _client!.from(table).select(columns); // Use dynamic for builder
 
     if (filters != null) {
       filters.forEach((key, value) {
@@ -64,7 +65,7 @@ class SupabaseService {
     }
 
     if (orderBy != null) {
-      query = query.order(orderBy, ascending: ascending);
+      query = query.order(orderBy, ascending: ascending); // No type error now
     }
 
     if (limit != null) {
@@ -136,7 +137,8 @@ class SupabaseService {
   }) async {
     try {
       if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible de récupérer les recettes.');
+        print(
+            '❌ Supabase non initialisé, impossible de récupérer les recettes.');
         return [];
       }
 
@@ -229,10 +231,11 @@ class SupabaseService {
     }
     try {
       var query = _client!.from('products').select('*');
-      
+
       // Appliquer les filtres
       if (searchQuery != null && searchQuery.isNotEmpty) {
-        query = query.or('name.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
+        query = query
+            .or('name.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
       }
       if (category != null && category.isNotEmpty) {
         query = query.eq('category', category);
@@ -246,12 +249,13 @@ class SupabaseService {
       if (inStock != null) {
         query = query.eq('in_stock', inStock);
       }
-      
+
       final response = await query
           .order('name', ascending: true)
           .range(offset, offset + limit - 1);
 
-      List<Map<String, dynamic>> products = List<Map<String, dynamic>>.from(response);
+      List<Map<String, dynamic>> products =
+          List<Map<String, dynamic>>.from(response);
       if (shuffle && products.isNotEmpty) {
         products.shuffle();
       }
@@ -323,7 +327,8 @@ class SupabaseService {
   }) async {
     try {
       if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible de mettre à jour le profil.');
+        print(
+            '❌ Supabase non initialisé, impossible de mettre à jour le profil.');
         return;
       }
 
@@ -351,7 +356,8 @@ class SupabaseService {
   static Future<List<Map<String, dynamic>>> getUserFavorites() async {
     try {
       if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible de récupérer les favoris.');
+        print(
+            '❌ Supabase non initialisé, impossible de récupérer les favoris.');
         return [];
       }
 
@@ -408,7 +414,8 @@ class SupabaseService {
   static Future<void> removeFromFavorites(String itemId) async {
     try {
       if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible de supprimer des favoris.');
+        print(
+            '❌ Supabase non initialisé, impossible de supprimer des favoris.');
         return;
       }
 
@@ -431,7 +438,8 @@ class SupabaseService {
       {int limit = 20}) async {
     try {
       if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible de récupérer l\'historique.');
+        print(
+            '❌ Supabase non initialisé, impossible de récupérer l\'historique.');
         return [];
       }
 
@@ -469,7 +477,8 @@ class SupabaseService {
   static Future<void> addToHistory(String itemId) async {
     try {
       if (!_isInitialized) {
-        print('❌ Supabase non initialisé, impossible d\'ajouter à l\'historique.');
+        print(
+            '❌ Supabase non initialisé, impossible d\'ajouter à l\'historique.');
         return;
       }
 

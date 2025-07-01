@@ -164,7 +164,7 @@ class VideoStateManager extends ChangeNotifier {
       if (_isMuted) await controller.setVolume(0.0);
 
       // Ajouter le listener
-      _listeners[videoId] = controller.addListener(() {
+      controller.addListener(() {
         _onVideoStateChanged(videoId, controller);
       });
 
@@ -412,6 +412,12 @@ class VideoStateManager extends ChangeNotifier {
 
   /// Obtient les métriques
   Map<String, dynamic> getMetrics() {
+    var mostPlayedList = _playCount.entries.toList();
+    mostPlayedList.sort((a, b) => b.value.compareTo(a.value));
+    var mostPlayed = mostPlayedList
+        .take(5)
+        .map((e) => {'video_id': e.key, 'play_count': e.value})
+        .toList();
     return {
       'cached_videos': _controllers.length,
       'total_play_count':
@@ -419,11 +425,7 @@ class VideoStateManager extends ChangeNotifier {
       'total_play_time': _totalPlayTime.values
           .fold(Duration.zero, (sum, duration) => sum + duration),
       'total_errors': _errorCount.values.fold(0, (sum, count) => sum + count),
-      'most_played': _playCount.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value))
-            .take(5)
-            .map((e) => {'video_id': e.key, 'play_count': e.value})
-            .toList(),
+      'most_played': mostPlayed,
     };
   }
 
