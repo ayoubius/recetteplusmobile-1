@@ -2,17 +2,35 @@ import 'package:flutter/foundation.dart';
 import 'supabase_service.dart';
 
 class VideoService {
-  // Récupérer les vidéos avec pagination infinie
-  static Future<List<Map<String, dynamic>>> getInfiniteVideos({
-    int page = 0,
-    int limit = 10,
+  // Récupérer les vidéos avec pagination
+  static Future<List<Map<String, dynamic>>> getVideos({
     String? category,
+    int limit = 20,
+    int offset = 0,
   }) async {
     try {
-      final offset = page * limit;
       return await SupabaseService.getVideos(
         category: category,
         limit: limit,
+        offset: offset,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération des vidéos: $e');
+      }
+      return [];
+    }
+  }
+
+  // Récupérer les vidéos avec pagination infinie
+  static Future<List<Map<String, dynamic>>> getInfiniteVideos({
+    required int offset,
+    required int batchSize,
+    List<String> excludeIds = const [],
+  }) async {
+    try {
+      return await SupabaseService.getVideos(
+        limit: batchSize,
         offset: offset,
       );
     } catch (e) {
@@ -24,38 +42,15 @@ class VideoService {
   }
 
   // Rechercher des vidéos
-  static Future<List<Map<String, dynamic>>> searchVideos({
-    required String query,
-    String? category,
-    int limit = 20,
-  }) async {
+  static Future<List<Map<String, dynamic>>> searchVideos(String query) async {
     try {
       return await SupabaseService.getVideos(
         searchQuery: query,
-        category: category,
-        limit: limit,
+        limit: 50,
       );
     } catch (e) {
       if (kDebugMode) {
         print('❌ Erreur lors de la recherche de vidéos: $e');
-      }
-      return [];
-    }
-  }
-
-  // Récupérer toutes les vidéos
-  static Future<List<Map<String, dynamic>>> getAllVideos({
-    String? category,
-    int limit = 50,
-  }) async {
-    try {
-      return await SupabaseService.getVideos(
-        category: category,
-        limit: limit,
-      );
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur lors de la récupération de toutes les vidéos: $e');
       }
       return [];
     }

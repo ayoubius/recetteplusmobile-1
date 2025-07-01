@@ -2,220 +2,93 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 
 class SupabaseService {
-  // Utiliser directement l'instance globale de Supabase
   static SupabaseClient get client => Supabase.instance.client;
   
-  static bool get isInitialized {
-    try {
-      // Vérifier si Supabase est initialisé en tentant d'accéder au client
-      final _ = Supabase.instance.client;
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
+  static bool get isInitialized => Supabase.instance.client.supabaseUrl.isNotEmpty;
 
-  // Méthodes utilitaires pour les requêtes communes
-  static Future<List<Map<String, dynamic>>> select(
-    String table, {
-    String columns = '*',
-    Map<String, dynamic>? filters,
-    String? orderBy,
-    bool ascending = true,
-    int? limit,
-    int? offset,
-  }) async {
-    if (!isInitialized) {
-      throw Exception('Supabase n\'est pas initialisé');
-    }
-
-    dynamic query = client.from(table).select(columns);
-
-    if (filters != null) {
-      filters.forEach((key, value) {
-        query = query.eq(key, value);
-      });
-    }
-
-    if (orderBy != null) {
-      query = query.order(orderBy, ascending: ascending);
-    }
-
-    if (limit != null) {
-      if (offset != null) {
-        return await query.range(offset, offset + limit - 1);
-      } else {
-        return await query.limit(limit);
-      }
-    } else {
-      return await query;
-    }
-  }
-
-  static Future<List<Map<String, dynamic>>> insert(
-    String table,
-    Map<String, dynamic> data,
-  ) async {
-    if (!isInitialized) {
-      throw Exception('Supabase n\'est pas initialisé');
-    }
-
-    return await client.from(table).insert(data).select();
-  }
-
-  static Future<List<Map<String, dynamic>>> update(
-    String table,
-    Map<String, dynamic> data, {
-    required Map<String, dynamic> filters,
-  }) async {
-    if (!isInitialized) {
-      throw Exception('Supabase n\'est pas initialisé');
-    }
-
-    var query = client.from(table).update(data);
-
-    filters.forEach((key, value) {
-      query = query.eq(key, value);
-    });
-
-    return await query.select();
-  }
-
-  static Future<List<Map<String, dynamic>>> delete(
-    String table, {
-    required Map<String, dynamic> filters,
-  }) async {
-    if (!isInitialized) {
-      throw Exception('Supabase n\'est pas initialisé');
-    }
-
-    var query = client.from(table).delete();
-
-    filters.forEach((key, value) {
-      query = query.eq(key, value);
-    });
-
-    return await query.select();
-  }
-
-  // Méthodes spécifiques pour les recettes
+  // Récupérer les recettes avec données de test en fallback
   static Future<List<Map<String, dynamic>>> getRecipes({
     String? searchQuery,
     String? category,
-    String? difficulty,
-    int? maxPrepTime,
-    double? minRating,
     int limit = 20,
     int offset = 0,
   }) async {
     try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, utilisation des données de test pour les recettes.');
+      if (isInitialized) {
+        var query = client.from('recipes').select('*');
+        
+        if (searchQuery != null && searchQuery.isNotEmpty) {
+          query = query.or('title.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
         }
-        return _getTestRecipes();
+        
+        if (category != null && category.isNotEmpty) {
+          query = query.eq('category', category);
+        }
+        
+        final response = await query
+            .order('created_at', ascending: false)
+            .range(offset, offset + limit - 1);
+        
+        if (response.isNotEmpty) {
+          return response;
+        }
       }
-
-      var query = client.from('recipes').select('*');
-
-      // Appliquer les filtres
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        query = query
-            .or('title.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
-      }
-
-      if (category != null && category.isNotEmpty) {
-        query = query.eq('category', category);
-      }
-
-      if (difficulty != null && difficulty.isNotEmpty) {
-        query = query.eq('difficulty', difficulty);
-      }
-
-      if (maxPrepTime != null) {
-        query = query.lte('prep_time', maxPrepTime);
-      }
-
-      if (minRating != null) {
-        query = query.gte('rating', minRating);
-      }
-
-      final response = await query
-          .order('rating', ascending: false)
-          .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1);
-
-      return response;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la récupération des recettes: $e');
-        print('🔄 Utilisation des données de test...');
+        print('❌ Erreur Supabase pour les recettes: $e');
       }
-      return _getTestRecipes();
     }
+
+    // Données de test en fallback
+    if (kDebugMode) {
+      print('📱 Utilisation des données de test pour les recettes');
+    }
+    
+    return _getTestRecipes(searchQuery: searchQuery, category: category, limit: limit, offset: offset);
   }
 
-  // Données de test pour les recettes
-  static List<Map<String, dynamic>> _getTestRecipes() {
-    return [
-      {
-        'id': '1',
-        'title': 'Pasta Carbonara',
-        'description': 'Un classique italien avec des œufs, du parmesan et du bacon',
-        'image_url': 'https://images.unsplash.com/photo-1621996346565-e3dbc353d2e5?w=400',
-        'prep_time': 20,
-        'cook_time': 15,
-        'difficulty': 'Facile',
-        'rating': 4.8,
-        'category': 'Italien',
-        'ingredients': ['Pâtes', 'Œufs', 'Parmesan', 'Bacon', 'Poivre noir'],
-        'instructions': [
-          'Faire cuire les pâtes',
-          'Préparer la sauce aux œufs',
-          'Mélanger et servir'
-        ],
-        'created_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
-      },
-      {
-        'id': '2',
-        'title': 'Salade César',
-        'description': 'Salade fraîche avec croûtons et sauce césar maison',
-        'image_url': 'https://images.unsplash.com/photo-1546793665-c74683f339c1?w=400',
-        'prep_time': 15,
-        'cook_time': 0,
-        'difficulty': 'Facile',
-        'rating': 4.5,
-        'category': 'Salade',
-        'ingredients': ['Laitue romaine', 'Croûtons', 'Parmesan', 'Anchois'],
-        'instructions': [
-          'Préparer la salade',
-          'Faire la sauce',
-          'Assembler et servir'
-        ],
-        'created_at': DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
-      },
-      {
-        'id': '3',
-        'title': 'Coq au Vin',
-        'description': 'Plat traditionnel français au vin rouge',
-        'image_url': 'https://images.unsplash.com/photo-1604503468506-a8da13d82791?w=400',
-        'prep_time': 30,
-        'cook_time': 90,
-        'difficulty': 'Difficile',
-        'rating': 4.9,
-        'category': 'Français',
-        'ingredients': ['Poulet', 'Vin rouge', 'Champignons', 'Lardons'],
-        'instructions': [
-          'Mariner le poulet',
-          'Faire revenir les ingrédients',
-          'Mijoter longuement'
-        ],
-        'created_at': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
-      },
-    ];
+  // Récupérer les produits avec données de test en fallback
+  static Future<List<Map<String, dynamic>>> getProducts({
+    String? searchQuery,
+    String? category,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      if (isInitialized) {
+        var query = client.from('products').select('*');
+        
+        if (searchQuery != null && searchQuery.isNotEmpty) {
+          query = query.or('name.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
+        }
+        
+        if (category != null && category.isNotEmpty) {
+          query = query.eq('category', category);
+        }
+        
+        final response = await query
+            .order('created_at', ascending: false)
+            .range(offset, offset + limit - 1);
+        
+        if (response.isNotEmpty) {
+          return response;
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur Supabase pour les produits: $e');
+      }
+    }
+
+    // Données de test en fallback
+    if (kDebugMode) {
+      print('📱 Utilisation des données de test pour les produits');
+    }
+    
+    return _getTestProducts(searchQuery: searchQuery, category: category, limit: limit, offset: offset);
   }
 
-  // Méthodes spécifiques pour les vidéos
+  // Récupérer les vidéos avec données de test en fallback
   static Future<List<Map<String, dynamic>>> getVideos({
     String? searchQuery,
     String? category,
@@ -223,459 +96,357 @@ class SupabaseService {
     int offset = 0,
   }) async {
     try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, utilisation des données de test pour les vidéos.');
+      if (isInitialized) {
+        var query = client.from('videos').select('*');
+        
+        if (searchQuery != null && searchQuery.isNotEmpty) {
+          query = query.or('title.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
         }
-        return _getTestVideos();
+        
+        if (category != null && category.isNotEmpty) {
+          query = query.eq('category', category);
+        }
+        
+        final response = await query
+            .order('created_at', ascending: false)
+            .range(offset, offset + limit - 1);
+        
+        if (response.isNotEmpty) {
+          return response;
+        }
       }
-
-      var query = client.from('videos').select('*');
-
-      // Appliquer les filtres
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        query = query
-            .or('title.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
-      }
-
-      if (category != null && category.isNotEmpty) {
-        query = query.eq('category', category);
-      }
-
-      final response = await query
-          .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1);
-
-      return response;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la récupération des vidéos: $e');
-        print('🔄 Utilisation des données de test...');
+        print('❌ Erreur Supabase pour les vidéos: $e');
       }
-      return _getTestVideos();
     }
+
+    // Données de test en fallback
+    if (kDebugMode) {
+      print('📱 Utilisation des données de test pour les vidéos');
+    }
+    
+    return _getTestVideos(searchQuery: searchQuery, category: category, limit: limit, offset: offset);
   }
 
-  // Données de test pour les vidéos
-  static List<Map<String, dynamic>> _getTestVideos() {
-    return [
-      {
-        'id': '1',
-        'title': 'Comment faire des pâtes parfaites',
-        'description': 'Apprenez les secrets pour des pâtes al dente',
-        'video_url': 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        'thumbnail_url': 'https://images.unsplash.com/photo-1621996346565-e3dbc353d2e5?w=400',
-        'duration': 300,
-        'category': 'Technique',
-        'views': 1250,
-        'likes': 89,
-        'created_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
-      },
-      {
-        'id': '2',
-        'title': 'Techniques de découpe des légumes',
-        'description': 'Maîtrisez l\'art de la découpe comme un chef',
-        'video_url': 'https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-        'thumbnail_url': 'https://images.unsplash.com/photo-1546793665-c74683f339c1?w=400',
-        'duration': 420,
-        'category': 'Technique',
-        'views': 2100,
-        'likes': 156,
-        'created_at': DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
-      },
-      {
-        'id': '3',
-        'title': 'Recette de pain maison',
-        'description': 'Du pain frais fait maison en quelques étapes',
-        'video_url': 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-        'thumbnail_url': 'https://images.unsplash.com/photo-1604503468506-a8da13d82791?w=400',
-        'duration': 600,
-        'category': 'Boulangerie',
-        'views': 3200,
-        'likes': 245,
-        'created_at': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
-      },
-    ];
-  }
-
-  // Méthodes spécifiques pour les produits
-  static Future<List<Map<String, dynamic>>> getProducts({
-    String? searchQuery,
-    String? category,
-    double? minPrice,
-    double? maxPrice,
-    bool? inStock,
-    int limit = 20,
-    int offset = 0,
-    bool shuffle = false,
-  }) async {
+  // Récupérer le profil utilisateur
+  static Future<Map<String, dynamic>?> getUserProfile() async {
     try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, utilisation des données de test pour les produits.');
+      if (isInitialized) {
+        final user = client.auth.currentUser;
+        if (user != null) {
+          final response = await client
+              .from('profiles')
+              .select('*')
+              .eq('id', user.id)
+              .maybeSingle();
+          
+          if (response != null) {
+            return response;
+          }
         }
-        return _getTestProducts(shuffle: shuffle);
       }
-
-      var query = client.from('products').select('*');
-
-      // Appliquer les filtres
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        query = query
-            .or('name.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
-      }
-      if (category != null && category.isNotEmpty) {
-        query = query.eq('category', category);
-      }
-      if (minPrice != null) {
-        query = query.gte('price', minPrice);
-      }
-      if (maxPrice != null) {
-        query = query.lte('price', maxPrice);
-      }
-      if (inStock != null) {
-        query = query.eq('in_stock', inStock);
-      }
-
-      final response = await query
-          .order('name', ascending: true)
-          .range(offset, offset + limit - 1);
-
-      List<Map<String, dynamic>> products =
-          List<Map<String, dynamic>>.from(response);
-      if (shuffle && products.isNotEmpty) {
-        products.shuffle();
-      }
-      return products;
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur lors de la récupération des produits: $e');
-        print('🔄 Utilisation des données de test...');
-      }
-      return _getTestProducts(shuffle: shuffle);
-    }
-  }
-
-  // Données de test pour les produits
-  static List<Map<String, dynamic>> _getTestProducts({bool shuffle = false}) {
-    List<Map<String, dynamic>> products = [
-      {
-        'id': '1',
-        'name': 'Tomates cerises bio',
-        'description': 'Tomates cerises fraîches et biologiques',
-        'price': 3.50,
-        'image_url': 'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=400',
-        'category': 'Légumes',
-        'in_stock': true,
-        'stock_quantity': 25,
-        'unit': 'barquette',
-        'created_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
-      },
-      {
-        'id': '2',
-        'name': 'Pâtes italiennes',
-        'description': 'Pâtes artisanales italiennes de qualité premium',
-        'price': 4.20,
-        'image_url': 'https://images.unsplash.com/photo-1621996346565-e3dbc353d2e5?w=400',
-        'category': 'Épicerie',
-        'in_stock': true,
-        'stock_quantity': 50,
-        'unit': 'paquet',
-        'created_at': DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
-      },
-      {
-        'id': '3',
-        'name': 'Fromage parmesan',
-        'description': 'Parmesan italien AOP vieilli 24 mois',
-        'price': 12.80,
-        'image_url': 'https://images.unsplash.com/photo-1486297678162-eb2a19b0a32d?w=400',
-        'category': 'Fromage',
-        'in_stock': true,
-        'stock_quantity': 15,
-        'unit': 'morceau',
-        'created_at': DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
-      },
-      {
-        'id': '4',
-        'name': 'Huile d\'olive extra vierge',
-        'description': 'Huile d\'olive première pression à froid',
-        'price': 8.90,
-        'image_url': 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400',
-        'category': 'Épicerie',
-        'in_stock': true,
-        'stock_quantity': 30,
-        'unit': 'bouteille',
-        'created_at': DateTime.now().subtract(const Duration(days: 4)).toIso8601String(),
-      },
-    ];
-
-    if (shuffle) {
-      products.shuffle();
-    }
-    return products;
-  }
-
-  // Méthodes pour les profils utilisateur
-  static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
-    try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, impossible de récupérer le profil.');
-        }
-        return null;
-      }
-
-      final response = await client
-          .from('user_profiles')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-      return response;
     } catch (e) {
       if (kDebugMode) {
         print('❌ Erreur lors de la récupération du profil: $e');
       }
-      return null;
     }
+
+    // Profil de test en fallback
+    return {
+      'id': 'test-user-id',
+      'email': 'test@example.com',
+      'full_name': 'Utilisateur Test',
+      'avatar_url': 'https://via.placeholder.com/150/4ECDC4/FFFFFF?text=UT',
+      'created_at': DateTime.now().toIso8601String(),
+    };
   }
 
-  static Future<void> createUserProfile({
-    required String userId,
-    required String email,
-    String? firstName,
-    String? lastName,
-    String? phone,
-    String? avatar,
-  }) async {
-    try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, impossible de créer le profil.');
-        }
-        return;
-      }
+  // Données de test pour les recettes
+  static List<Map<String, dynamic>> _getTestRecipes({
+    String? searchQuery,
+    String? category,
+    int limit = 20,
+    int offset = 0,
+  }) {
+    List<Map<String, dynamic>> testRecipes = [
+      {
+        'id': '1',
+        'title': 'Pâtes Carbonara Authentiques',
+        'description': 'La vraie recette italienne des pâtes carbonara avec œufs, pecorino et guanciale.',
+        'image_url': 'https://via.placeholder.com/400x300/FF6B6B/FFFFFF?text=Carbonara',
+        'prep_time': 15,
+        'cook_time': 20,
+        'servings': 4,
+        'difficulty': 'Facile',
+        'category': 'Plats principaux',
+        'ingredients': [
+          {'name': 'Spaghetti', 'quantity': '400g'},
+          {'name': 'Œufs', 'quantity': '4'},
+          {'name': 'Pecorino Romano', 'quantity': '100g'},
+          {'name': 'Guanciale', 'quantity': '150g'},
+          {'name': 'Poivre noir', 'quantity': 'Au goût'},
+        ],
+        'instructions': [
+          'Faire cuire les pâtes dans l\'eau salée',
+          'Faire revenir le guanciale',
+          'Mélanger œufs et fromage',
+          'Combiner le tout hors du feu',
+        ],
+        'created_at': '2024-01-15T10:00:00Z',
+        'likes': 245,
+        'rating': 4.8,
+      },
+      {
+        'id': '2',
+        'title': 'Tarte Tatin aux Pommes',
+        'description': 'Dessert français classique avec des pommes caramélisées et une pâte brisée.',
+        'image_url': 'https://via.placeholder.com/400x300/4ECDC4/FFFFFF?text=Tarte+Tatin',
+        'prep_time': 30,
+        'cook_time': 45,
+        'servings': 8,
+        'difficulty': 'Moyen',
+        'category': 'Desserts',
+        'ingredients': [
+          {'name': 'Pommes', 'quantity': '8'},
+          {'name': 'Sucre', 'quantity': '150g'},
+          {'name': 'Beurre', 'quantity': '50g'},
+          {'name': 'Pâte brisée', 'quantity': '1'},
+        ],
+        'instructions': [
+          'Préparer le caramel',
+          'Disposer les pommes',
+          'Recouvrir de pâte',
+          'Cuire au four',
+        ],
+        'created_at': '2024-01-14T14:30:00Z',
+        'likes': 189,
+        'rating': 4.6,
+      },
+      {
+        'id': '3',
+        'title': 'Salade César Maison',
+        'description': 'Salade fraîche avec sa sauce césar authentique et ses croûtons dorés.',
+        'image_url': 'https://via.placeholder.com/400x300/45B7D1/FFFFFF?text=Salade+César',
+        'prep_time': 20,
+        'cook_time': 10,
+        'servings': 4,
+        'difficulty': 'Facile',
+        'category': 'Entrées',
+        'ingredients': [
+          {'name': 'Laitue romaine', 'quantity': '2 têtes'},
+          {'name': 'Parmesan', 'quantity': '100g'},
+          {'name': 'Pain', 'quantity': '4 tranches'},
+          {'name': 'Anchois', 'quantity': '6 filets'},
+          {'name': 'Œuf', 'quantity': '1'},
+        ],
+        'instructions': [
+          'Préparer la sauce',
+          'Faire les croûtons',
+          'Laver la salade',
+          'Assembler et servir',
+        ],
+        'created_at': '2024-01-13T16:45:00Z',
+        'likes': 156,
+        'rating': 4.4,
+      },
+    ];
 
-      await client.from('user_profiles').insert({
-        'user_id': userId,
-        'email': email,
-        'first_name': firstName,
-        'last_name': lastName,
-        'phone': phone,
-        'avatar': avatar,
-        'created_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur lors de la création du profil: $e');
-      }
-      rethrow;
+    // Appliquer les filtres
+    List<Map<String, dynamic>> filteredRecipes = testRecipes;
+
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      filteredRecipes = filteredRecipes.where((recipe) {
+        final title = recipe['title']?.toString().toLowerCase() ?? '';
+        final description = recipe['description']?.toString().toLowerCase() ?? '';
+        final query = searchQuery.toLowerCase();
+        return title.contains(query) || description.contains(query);
+      }).toList();
     }
-  }
 
-  static Future<void> updateUserProfile({
-    required String userId,
-    String? firstName,
-    String? lastName,
-    String? phone,
-    String? avatar,
-    Map<String, dynamic>? additionalData,
-  }) async {
-    try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, impossible de mettre à jour le profil.');
-        }
-        return;
-      }
-
-      Map<String, dynamic> updateData = {
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-
-      if (firstName != null) updateData['first_name'] = firstName;
-      if (lastName != null) updateData['last_name'] = lastName;
-      if (phone != null) updateData['phone'] = phone;
-      if (avatar != null) updateData['avatar'] = avatar;
-      if (additionalData != null) updateData.addAll(additionalData);
-
-      await client
-          .from('user_profiles')
-          .update(updateData)
-          .eq('user_id', userId);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur lors de la mise à jour du profil: $e');
-      }
-      rethrow;
+    if (category != null && category.isNotEmpty) {
+      filteredRecipes = filteredRecipes.where((recipe) {
+        return recipe['category']?.toString() == category;
+      }).toList();
     }
-  }
 
-  // Méthodes pour les favoris
-  static Future<List<Map<String, dynamic>>> getUserFavorites() async {
-    try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, retour de favoris vides.');
-        }
-        return [];
-      }
-
-      final user = client.auth.currentUser;
-      if (user == null) return [];
-
-      final response = await client
-          .from('favorites')
-          .select('recipe_id')
-          .eq('user_id', user.id);
-
-      if (response.isNotEmpty) {
-        List<Map<String, dynamic>> recipes = [];
-        for (var favorite in response) {
-          final recipe = await client
-              .from('recipes')
-              .select('*')
-              .eq('id', favorite['recipe_id'])
-              .maybeSingle();
-          if (recipe != null) {
-            recipes.add(recipe);
-          }
-        }
-        return recipes;
-      }
-      return [];
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur lors de la récupération des favoris: $e');
-      }
-      return [];
-    }
-  }
-
-  static Future<void> addToFavorites(String itemId, String type) async {
-    try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, impossible d\'ajouter aux favoris.');
-        }
-        return;
-      }
-
-      final user = client.auth.currentUser;
-      if (user == null) return;
-
-      await client.from('favorites').insert({
-        'user_id': user.id,
-        'recipe_id': itemId,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur lors de l\'ajout aux favoris: $e');
-      }
-      rethrow;
-    }
-  }
-
-  static Future<void> removeFromFavorites(String itemId) async {
-    try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, impossible de supprimer des favoris.');
-        }
-        return;
-      }
-
-      final user = client.auth.currentUser;
-      if (user == null) return;
-
-      await client
-          .from('favorites')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('recipe_id', itemId);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur lors de la suppression des favoris: $e');
-      }
-      rethrow;
-    }
-  }
-
-  // Méthodes pour l'historique
-  static Future<List<Map<String, dynamic>>> getUserHistory(
-      {int limit = 20}) async {
-    try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, retour d\'historique vide.');
-        }
-        return [];
-      }
-
-      final user = client.auth.currentUser;
-      if (user == null) return [];
-
-      final response = await client
-          .from('user_history')
-          .select('recipe_id')
-          .eq('user_id', user.id)
-          .order('viewed_at', ascending: false)
-          .limit(limit);
-
-      if (response.isNotEmpty) {
-        List<Map<String, dynamic>> recipes = [];
-        for (var history in response) {
-          final recipe = await client
-              .from('recipes')
-              .select('*')
-              .eq('id', history['recipe_id'])
-              .maybeSingle();
-          if (recipe != null) {
-            recipes.add(recipe);
-          }
-        }
-        return recipes;
-      }
-      return [];
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur lors de la récupération de l\'historique: $e');
-      }
+    // Appliquer la pagination
+    final startIndex = offset;
+    final endIndex = (startIndex + limit).clamp(0, filteredRecipes.length);
+    
+    if (startIndex >= filteredRecipes.length) {
       return [];
     }
+
+    return filteredRecipes.sublist(startIndex, endIndex);
   }
 
-  static Future<void> addToHistory(String itemId) async {
-    try {
-      if (!isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, impossible d\'ajouter à l\'historique.');
-        }
-        return;
-      }
+  // Données de test pour les produits
+  static List<Map<String, dynamic>> _getTestProducts({
+    String? searchQuery,
+    String? category,
+    int limit = 20,
+    int offset = 0,
+  }) {
+    List<Map<String, dynamic>> testProducts = [
+      {
+        'id': '1',
+        'name': 'Huile d\'Olive Extra Vierge',
+        'description': 'Huile d\'olive de première pression à froid, idéale pour assaisonnements.',
+        'image_url': 'https://via.placeholder.com/300x300/96CEB4/FFFFFF?text=Huile+Olive',
+        'price': 12.99,
+        'unit': '500ml',
+        'category': 'Huiles et Vinaigres',
+        'in_stock': true,
+        'stock_quantity': 25,
+        'rating': 4.7,
+        'created_at': '2024-01-15T10:00:00Z',
+      },
+      {
+        'id': '2',
+        'name': 'Parmesan AOP 24 mois',
+        'description': 'Fromage Parmigiano Reggiano affiné 24 mois, au goût intense et fruité.',
+        'image_url': 'https://via.placeholder.com/300x300/FECA57/FFFFFF?text=Parmesan',
+        'price': 8.50,
+        'unit': '200g',
+        'category': 'Fromages',
+        'in_stock': true,
+        'stock_quantity': 15,
+        'rating': 4.9,
+        'created_at': '2024-01-14T14:30:00Z',
+      },
+      {
+        'id': '3',
+        'name': 'Pâtes Spaghetti Bio',
+        'description': 'Spaghetti biologiques de blé dur, texture parfaite pour tous vos plats.',
+        'image_url': 'https://via.placeholder.com/300x300/FF9F43/FFFFFF?text=Spaghetti',
+        'price': 3.20,
+        'unit': '500g',
+        'category': 'Pâtes et Riz',
+        'in_stock': true,
+        'stock_quantity': 40,
+        'rating': 4.5,
+        'created_at': '2024-01-13T16:45:00Z',
+      },
+      {
+        'id': '4',
+        'name': 'Tomates San Marzano',
+        'description': 'Tomates pelées italiennes San Marzano DOP, parfaites pour les sauces.',
+        'image_url': 'https://via.placeholder.com/300x300/FF6B6B/FFFFFF?text=Tomates',
+        'price': 4.80,
+        'unit': '400g',
+        'category': 'Conserves',
+        'in_stock': true,
+        'stock_quantity': 30,
+        'rating': 4.6,
+        'created_at': '2024-01-12T12:15:00Z',
+      },
+    ];
 
-      final user = client.auth.currentUser;
-      if (user == null) return;
+    // Appliquer les filtres
+    List<Map<String, dynamic>> filteredProducts = testProducts;
 
-      // Supprimer l'entrée existante s'il y en a une
-      await client
-          .from('user_history')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('recipe_id', itemId);
-
-      // Ajouter la nouvelle entrée
-      await client.from('user_history').insert({
-        'user_id': user.id,
-        'recipe_id': itemId,
-        'viewed_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      if (kDebugMode) {
-        print('⚠️ Erreur lors de l\'ajout à l\'historique: $e');
-      }
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      filteredProducts = filteredProducts.where((product) {
+        final name = product['name']?.toString().toLowerCase() ?? '';
+        final description = product['description']?.toString().toLowerCase() ?? '';
+        final query = searchQuery.toLowerCase();
+        return name.contains(query) || description.contains(query);
+      }).toList();
     }
+
+    if (category != null && category.isNotEmpty) {
+      filteredProducts = filteredProducts.where((product) {
+        return product['category']?.toString() == category;
+      }).toList();
+    }
+
+    // Appliquer la pagination
+    final startIndex = offset;
+    final endIndex = (startIndex + limit).clamp(0, filteredProducts.length);
+    
+    if (startIndex >= filteredProducts.length) {
+      return [];
+    }
+
+    return filteredProducts.sublist(startIndex, endIndex);
+  }
+
+  // Données de test pour les vidéos
+  static List<Map<String, dynamic>> _getTestVideos({
+    String? searchQuery,
+    String? category,
+    int limit = 20,
+    int offset = 0,
+  }) {
+    List<Map<String, dynamic>> testVideos = [
+      {
+        'id': '1',
+        'title': 'Technique de la Carbonara',
+        'description': 'Apprenez la vraie technique italienne pour réussir vos carbonara.',
+        'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        'thumbnail': 'https://via.placeholder.com/400x300/FF6B6B/FFFFFF?text=Carbonara',
+        'duration': 300,
+        'category': 'Technique',
+        'likes': 1250,
+        'views': 15000,
+        'created_at': '2024-01-15T10:00:00Z',
+        'recipe_id': '1',
+      },
+      {
+        'id': '2',
+        'title': 'Pâtisserie: Tarte Tatin',
+        'description': 'Maîtrisez l\'art de la tarte tatin avec nos conseils de chef.',
+        'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+        'thumbnail': 'https://via.placeholder.com/400x300/4ECDC4/FFFFFF?text=Tarte+Tatin',
+        'duration': 420,
+        'category': 'Pâtisserie',
+        'likes': 890,
+        'views': 12000,
+        'created_at': '2024-01-14T14:30:00Z',
+        'recipe_id': '2',
+      },
+      {
+        'id': '3',
+        'title': 'Salade César Parfaite',
+        'description': 'Les secrets d\'une salade césar réussie avec sa sauce maison.',
+        'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+        'thumbnail': 'https://via.placeholder.com/400x300/45B7D1/FFFFFF?text=Salade+César',
+        'duration': 180,
+        'category': 'Technique',
+        'likes': 650,
+        'views': 8500,
+        'created_at': '2024-01-13T16:45:00Z',
+        'recipe_id': '3',
+      },
+    ];
+
+    // Appliquer les filtres
+    List<Map<String, dynamic>> filteredVideos = testVideos;
+
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      filteredVideos = filteredVideos.where((video) {
+        final title = video['title']?.toString().toLowerCase() ?? '';
+        final description = video['description']?.toString().toLowerCase() ?? '';
+        final query = searchQuery.toLowerCase();
+        return title.contains(query) || description.contains(query);
+      }).toList();
+    }
+
+    if (category != null && category.isNotEmpty) {
+      filteredVideos = filteredVideos.where((video) {
+        return video['category']?.toString() == category;
+      }).toList();
+    }
+
+    // Appliquer la pagination
+    final startIndex = offset;
+    final endIndex = (startIndex + limit).clamp(0, filteredVideos.length);
+    
+    if (startIndex >= filteredVideos.length) {
+      return [];
+    }
+
+    return filteredVideos.sublist(startIndex, endIndex);
   }
 }

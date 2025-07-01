@@ -4,25 +4,17 @@ import '../../../../core/services/video_state_manager.dart';
 import '../../../../core/constants/app_colors.dart';
 
 class VideoPlayerWidget extends StatefulWidget {
-  final String videoId;
-  final String videoUrl;
-  final String? thumbnailUrl;
-  final bool autoPlay;
-  final bool showControls;
-  final VoidCallback? onTap;
-  final VoidCallback? onPlay;
-  final VoidCallback? onPause;
+  final Map<String, dynamic> video;
+  final bool isActive;
+  final ValueNotifier<bool> pauseNotifier;
+  final VoidCallback? onRecipePressed;
 
   const VideoPlayerWidget({
     super.key,
-    required this.videoId,
-    required this.videoUrl,
-    this.thumbnailUrl,
-    this.autoPlay = false,
-    this.showControls = true,
-    this.onTap,
-    this.onPlay,
-    this.onPause,
+    required this.video,
+    required this.isActive,
+    required this.pauseNotifier,
+    this.onRecipePressed,
   });
 
   @override
@@ -58,27 +50,56 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _controlsAnimationController.forward();
     
-    _initializeVideo();
+    widget.pauseNotifier.addListener(_onPauseNotifierChanged);
+    
+    if (widget.isActive) {
+      _initializeVideo();
+    }
   }
 
   @override
   void dispose() {
+    widget.pauseNotifier.removeListener(_onPauseNotifierChanged);
     _controlsAnimationController.dispose();
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(VideoPlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    if (widget.isActive != oldWidget.isActive) {
+      if (widget.isActive) {
+        _initializeVideo();
+      } else {
+        pause();
+      }
+    }
+  }
+
+  void _onPauseNotifierChanged() {
+    if (widget.pauseNotifier.value) {
+      pause();
+    } else if (widget.isActive) {
+      play();
+    }
+  }
+
   Future<void> _initializeVideo() async {
-    if (_isInitializing) return;
+    if (_isInitializing || widget.video['video_url'] == null) return;
     
     setState(() {
       _isInitializing = true;
     });
 
     try {
-      _controller = _stateManager.getController(widget.videoId, widget.videoUrl);
+      final videoId = widget.video['id'].toString();
+      final videoUrl = widget.video['video_url'].toString();
+      
+      _controller = _stateManager.getController(videoId, videoUrl);
       
       if (_controller != null) {
-        await _controller!.initialize();
+        await _stateManager.initializeController(videoId);
         await _controller!.setLooping(true);
         
         _controller!.addListener(() {
@@ -87,9 +108,8 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
           }
         });
 
-        if (widget.autoPlay) {
-          await _stateManager.play(widget.videoId);
-          widget.onPlay?.call();
+        if (widget.isActive && !widget.pauseNotifier.value) {
+          await play();
         }
       }
     } catch (e) {
@@ -103,16 +123,42 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
+  Future<void> play() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    try {
+      final videoId = widget.video['id'].toString();
+      await _stateManager.pauseAllExcept(videoId);
+      await _stateManager.play(videoId);
+    } catch (e) {
+      debugPrint('❌ Erreur lors de la lecture: $e');
+    }
+  }
+
+  Future<void> pause() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    try {
+      final videoId = widget.video['id'].toString();
+      await _stateManager.pause(videoId);
+    } catch (e) {
+      debugPrint('❌ Erreur lors de la pause: $e');
+    }
+  }
+
+  void preloadVideo() {
+    if (!_isInitializing) {
+      _initializeVideo();
+    }
+  }
+
   Future<void> _togglePlayPause() async {
     if (_controller == null || !_controller!.value.isInitialized) return;
 
     if (_controller!.value.isPlaying) {
-      await _stateManager.pause(widget.videoId);
-      widget.onPause?.call();
+      await pause();
     } else {
-      await _stateManager.pauseAllExcept(widget.videoId);
-      await _stateManager.play(widget.videoId);
-      widget.onPlay?.call();
+      await play();
     }
   }
 
@@ -134,9 +180,9 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
       height: double.infinity,
       decoration: BoxDecoration(
         color: Colors.black,
-        image: widget.thumbnailUrl != null
+        image: widget.video['thumbnail'] != null
             ? DecorationImage(
-                image: NetworkImage(widget.thumbnailUrl!),
+                image: NetworkImage(widget.video['thumbnail']),
                 fit: BoxFit.cover,
               )
             : null,
@@ -209,7 +255,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   Widget _buildControls() {
-    if (!widget.showControls || _controller == null || !_controller!.value.isInitialized) {
+    if (_controller == null || !_controller!.value.isInitialized) {
       return const SizedBox.shrink();
     }
 
@@ -239,22 +285,24 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(
-                          Icons.arrow_back,
+                      Text(
+                        widget.video['title'] ?? 'Vidéo sans titre',
+                        style: const TextStyle(
                           color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      IconButton(
-                        onPressed: () {
-                          // Action pour plus d'options
-                        },
-                        icon: const Icon(
-                          Icons.more_vert,
-                          color: Colors.white,
+                      if (widget.onRecipePressed != null)
+                        IconButton(
+                          onPressed: widget.onRecipePressed,
+                          icon: const Icon(
+                            Icons.restaurant_menu,
+                            color: Colors.white,
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -297,7 +345,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
                       ),
                       const SizedBox(height: 8),
                       
-                      // Temps et contrôles
+                      // Temps et informations
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -310,24 +358,31 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
                           ),
                           Row(
                             children: [
-                              IconButton(
-                                onPressed: () {
-                                  // Action pour le volume
-                                },
-                                icon: const Icon(
-                                  Icons.volume_up,
+                              Icon(
+                                Icons.favorite_border,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${widget.video['likes'] ?? 0}',
+                                style: const TextStyle(
                                   color: Colors.white,
-                                  size: 20,
+                                  fontSize: 12,
                                 ),
                               ),
-                              IconButton(
-                                onPressed: () {
-                                  // Action pour le plein écran
-                                },
-                                icon: const Icon(
-                                  Icons.fullscreen,
+                              const SizedBox(width: 16),
+                              Icon(
+                                Icons.visibility,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${widget.video['views'] ?? 0}',
+                                style: const TextStyle(
                                   color: Colors.white,
-                                  size: 20,
+                                  fontSize: 12,
                                 ),
                               ),
                             ],
@@ -363,10 +418,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
-        widget.onTap?.call();
-        if (widget.showControls) {
-          _toggleControls();
-        }
+        _toggleControls();
       },
       child: Container(
         width: double.infinity,
@@ -378,7 +430,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
             if (_isInitializing)
               _buildLoadingIndicator()
             else if (_controller == null || !_controller!.value.isInitialized)
-              widget.thumbnailUrl != null
+              widget.video['thumbnail'] != null
                   ? _buildThumbnail()
                   : _buildLoadingIndicator()
             else if (_controller!.value.hasError)
