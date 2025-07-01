@@ -23,7 +23,7 @@ class SupabaseService {
       await Supabase.initialize(
         url: url,
         anonKey: anonKey,
-        debug: kDebugMode, // Utiliser kDebugMode pour le développement
+        debug: kDebugMode,
       );
 
       _client = Supabase.instance.client;
@@ -33,7 +33,6 @@ class SupabaseService {
     } catch (e) {
       print('Erreur lors de l\'initialisation de Supabase: $e');
       _isInitialized = false;
-      // Ne pas lancer d'exception pour permettre l'utilisation des données de test
     }
   }
 
@@ -70,17 +69,12 @@ class SupabaseService {
 
     if (limit != null) {
       if (offset != null) {
-        final response = await query
-            .range(offset, offset + limit - 1)
-            .execute();
-        return (response.data as List<dynamic>).cast<Map<String, dynamic>>();
+        return await query.range(offset, offset + limit - 1);
       } else {
-        final response = await query.limit(limit).execute();
-        return (response.data as List<dynamic>).cast<Map<String, dynamic>>();
+        return await query.limit(limit);
       }
     } else {
-      final response = await query.execute();
-      return (response.data as List<dynamic>).cast<Map<String, dynamic>>();
+      return await query;
     }
   }
 
@@ -92,8 +86,7 @@ class SupabaseService {
       throw Exception('Supabase n\'est pas initialisé');
     }
 
-    final response = await _client!.from(table).insert(data).select().execute();
-    return (response.data as List<dynamic>).cast<Map<String, dynamic>>();
+    return await _client!.from(table).insert(data).select();
   }
 
   static Future<List<Map<String, dynamic>>> update(
@@ -111,8 +104,7 @@ class SupabaseService {
       query = query.eq(key, value);
     });
 
-    final response = await query.select().execute();
-    return (response.data as List<dynamic>).cast<Map<String, dynamic>>();
+    return await query.select();
   }
 
   static Future<List<Map<String, dynamic>>> delete(
@@ -129,8 +121,7 @@ class SupabaseService {
       query = query.eq(key, value);
     });
 
-    final response = await query.select().execute();
-    return (response.data as List<dynamic>).cast<Map<String, dynamic>>();
+    return await query.select();
   }
 
   // Méthodes spécifiques pour les recettes
@@ -144,6 +135,11 @@ class SupabaseService {
     int offset = 0,
   }) async {
     try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible de récupérer les recettes.');
+        return [];
+      }
+
       var query = _client!.from('recipes').select('*');
 
       // Appliquer les filtres
@@ -171,17 +167,47 @@ class SupabaseService {
       final response = await query
           .order('rating', ascending: false)
           .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1)
-          .execute();
+          .range(offset, offset + limit - 1);
 
-      if (response.hasError) {
-        print('Supabase error: ${response.error!.message}');
+      return response;
+    } catch (e) {
+      print('❌ Erreur lors de la récupération des recettes: $e');
+      return [];
+    }
+  }
+
+  // Méthodes spécifiques pour les vidéos
+  static Future<List<Map<String, dynamic>>> getVideos({
+    String? searchQuery,
+    String? category,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible de récupérer les vidéos.');
         return [];
       }
 
-      return (response.data as List<dynamic>).cast<Map<String, dynamic>>();
+      var query = _client!.from('videos').select('*');
+
+      // Appliquer les filtres
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        query = query
+            .or('title.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
+      }
+
+      if (category != null && category.isNotEmpty) {
+        query = query.eq('category', category);
+      }
+
+      final response = await query
+          .order('created_at', ascending: false)
+          .range(offset, offset + limit - 1);
+
+      return response;
     } catch (e) {
-      print('❌ Erreur lors de la récupération des recettes: $e');
+      print('❌ Erreur lors de la récupération des vidéos: $e');
       return [];
     }
   }
@@ -203,6 +229,7 @@ class SupabaseService {
     }
     try {
       var query = _client!.from('products').select('*');
+      
       // Appliquer les filtres
       if (searchQuery != null && searchQuery.isNotEmpty) {
         query = query.or('name.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
@@ -219,17 +246,12 @@ class SupabaseService {
       if (inStock != null) {
         query = query.eq('in_stock', inStock);
       }
+      
       final response = await query
           .order('name', ascending: true)
-          .range(offset, offset + limit - 1)
-          .execute();
+          .range(offset, offset + limit - 1);
 
-      if (response.hasError) {
-        print('Supabase error: ${response.error!.message}');
-        return [];
-      }
-
-      List<Map<String, dynamic>> products = (response.data as List<dynamic>).cast<Map<String, dynamic>>();
+      List<Map<String, dynamic>> products = List<Map<String, dynamic>>.from(response);
       if (shuffle && products.isNotEmpty) {
         products.shuffle();
       }
@@ -243,19 +265,18 @@ class SupabaseService {
   // Méthodes pour les profils utilisateur
   static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible de récupérer le profil.');
+        return null;
+      }
+
       final response = await _client!
           .from('user_profiles')
           .select('*')
           .eq('user_id', userId)
-          .maybeSingle()
-          .execute();
+          .maybeSingle();
 
-      if (response.hasError) {
-        print('Supabase error: ${response.error!.message}');
-        return null;
-      }
-
-      return response.data;
+      return response;
     } catch (e) {
       print('❌ Erreur lors de la récupération du profil: $e');
       return null;
@@ -271,6 +292,11 @@ class SupabaseService {
     String? avatar,
   }) async {
     try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible de créer le profil.');
+        return;
+      }
+
       await _client!.from('user_profiles').insert({
         'user_id': userId,
         'email': email,
@@ -280,7 +306,7 @@ class SupabaseService {
         'avatar': avatar,
         'created_at': DateTime.now().toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
-      }).execute();
+      });
     } catch (e) {
       print('❌ Erreur lors de la création du profil: $e');
       rethrow;
@@ -296,6 +322,11 @@ class SupabaseService {
     Map<String, dynamic>? additionalData,
   }) async {
     try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible de mettre à jour le profil.');
+        return;
+      }
+
       Map<String, dynamic> updateData = {
         'updated_at': DateTime.now().toIso8601String(),
       };
@@ -309,8 +340,7 @@ class SupabaseService {
       await _client!
           .from('user_profiles')
           .update(updateData)
-          .eq('user_id', userId)
-          .execute();
+          .eq('user_id', userId);
     } catch (e) {
       print('❌ Erreur lors de la mise à jour du profil: $e');
       rethrow;
@@ -320,31 +350,29 @@ class SupabaseService {
   // Méthodes pour les favoris
   static Future<List<Map<String, dynamic>>> getUserFavorites() async {
     try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible de récupérer les favoris.');
+        return [];
+      }
+
       final user = _client!.auth.currentUser;
       if (user == null) return [];
 
       final response = await _client!
           .from('favorites')
           .select('recipe_id')
-          .eq('user_id', user.id)
-          .execute();
+          .eq('user_id', user.id);
 
-      if (response.hasError) {
-        print('Supabase error: ${response.error!.message}');
-        return [];
-      }
-
-      if (response.data != null && response.data is List) {
+      if (response.isNotEmpty) {
         List<Map<String, dynamic>> recipes = [];
-        for (var favorite in response.data as List) {
+        for (var favorite in response) {
           final recipe = await _client!
               .from('recipes')
               .select('*')
               .eq('id', favorite['recipe_id'])
-              .maybeSingle()
-              .execute();
-          if (recipe != null && recipe.data != null) {
-            recipes.add(recipe.data as Map<String, dynamic>);
+              .maybeSingle();
+          if (recipe != null) {
+            recipes.add(recipe);
           }
         }
         return recipes;
@@ -358,6 +386,11 @@ class SupabaseService {
 
   static Future<void> addToFavorites(String itemId, String type) async {
     try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible d\'ajouter aux favoris.');
+        return;
+      }
+
       final user = _client!.auth.currentUser;
       if (user == null) return;
 
@@ -365,7 +398,7 @@ class SupabaseService {
         'user_id': user.id,
         'recipe_id': itemId,
         'created_at': DateTime.now().toIso8601String(),
-      }).execute();
+      });
     } catch (e) {
       print('❌ Erreur lors de l\'ajout aux favoris: $e');
       rethrow;
@@ -374,6 +407,11 @@ class SupabaseService {
 
   static Future<void> removeFromFavorites(String itemId) async {
     try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible de supprimer des favoris.');
+        return;
+      }
+
       final user = _client!.auth.currentUser;
       if (user == null) return;
 
@@ -381,8 +419,7 @@ class SupabaseService {
           .from('favorites')
           .delete()
           .eq('user_id', user.id)
-          .eq('recipe_id', itemId)
-          .execute();
+          .eq('recipe_id', itemId);
     } catch (e) {
       print('❌ Erreur lors de la suppression des favoris: $e');
       rethrow;
@@ -393,6 +430,11 @@ class SupabaseService {
   static Future<List<Map<String, dynamic>>> getUserHistory(
       {int limit = 20}) async {
     try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible de récupérer l\'historique.');
+        return [];
+      }
+
       final user = _client!.auth.currentUser;
       if (user == null) return [];
 
@@ -401,25 +443,18 @@ class SupabaseService {
           .select('recipe_id')
           .eq('user_id', user.id)
           .order('viewed_at', ascending: false)
-          .limit(limit)
-          .execute();
+          .limit(limit);
 
-      if (response.hasError) {
-        print('Supabase error: ${response.error!.message}');
-        return [];
-      }
-
-      if (response.data != null && response.data is List) {
+      if (response.isNotEmpty) {
         List<Map<String, dynamic>> recipes = [];
-        for (var history in response.data as List) {
+        for (var history in response) {
           final recipe = await _client!
               .from('recipes')
               .select('*')
               .eq('id', history['recipe_id'])
-              .maybeSingle()
-              .execute();
-          if (recipe != null && recipe.data != null) {
-            recipes.add(recipe.data as Map<String, dynamic>);
+              .maybeSingle();
+          if (recipe != null) {
+            recipes.add(recipe);
           }
         }
         return recipes;
@@ -433,6 +468,11 @@ class SupabaseService {
 
   static Future<void> addToHistory(String itemId) async {
     try {
+      if (!_isInitialized) {
+        print('❌ Supabase non initialisé, impossible d\'ajouter à l\'historique.');
+        return;
+      }
+
       final user = _client!.auth.currentUser;
       if (user == null) return;
 
@@ -441,15 +481,14 @@ class SupabaseService {
           .from('user_history')
           .delete()
           .eq('user_id', user.id)
-          .eq('recipe_id', itemId)
-          .execute();
+          .eq('recipe_id', itemId);
 
       // Ajouter la nouvelle entrée
       await _client!.from('user_history').insert({
         'user_id': user.id,
         'recipe_id': itemId,
         'viewed_at': DateTime.now().toIso8601String(),
-      }).execute();
+      });
     } catch (e) {
       print('⚠️ Erreur lors de l\'ajout à l\'historique: $e');
     }

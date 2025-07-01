@@ -380,7 +380,7 @@ class VideoStateManager extends ChangeNotifier {
     }
 
     for (final listener in _listeners.values) {
-      listener.cancel();
+      await listener.cancel();
     }
 
     _controllers.clear();
@@ -388,7 +388,7 @@ class VideoStateManager extends ChangeNotifier {
     _videoInfo.clear();
     _activeVideoId = null;
 
-    _videoStateChangedController.close();
+    await _videoStateChangedController.close();
     notifyListeners();
   }
 
