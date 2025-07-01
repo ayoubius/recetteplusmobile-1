@@ -5,16 +5,16 @@ import '../../../../core/constants/app_colors.dart';
 
 class VideoPlayerWidget extends StatefulWidget {
   final Map<String, dynamic> video;
-  final bool isActive;
-  final ValueNotifier<bool> pauseNotifier;
-  final VoidCallback? onRecipePressed;
+  final VoidCallback? onTap;
+  final bool autoPlay;
+  final bool showControls;
 
   const VideoPlayerWidget({
     super.key,
     required this.video,
-    required this.isActive,
-    required this.pauseNotifier,
-    this.onRecipePressed,
+    this.onTap,
+    this.autoPlay = false,
+    this.showControls = true,
   });
 
   @override
@@ -49,39 +49,13 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
       curve: Curves.easeInOut,
     ));
 
-    widget.pauseNotifier.addListener(_onPauseNotifierChanged);
-    
-    if (widget.isActive) {
-      _initializeVideo();
-    }
+    _initializeVideo();
   }
 
   @override
   void dispose() {
-    widget.pauseNotifier.removeListener(_onPauseNotifierChanged);
     _controlsAnimationController.dispose();
     super.dispose();
-  }
-
-  @override
-  void didUpdateWidget(VideoPlayerWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    
-    if (widget.isActive != oldWidget.isActive) {
-      if (widget.isActive) {
-        _initializeVideo();
-      } else {
-        pause();
-      }
-    }
-  }
-
-  void _onPauseNotifierChanged() {
-    if (widget.pauseNotifier.value) {
-      pause();
-    } else if (widget.isActive) {
-      play();
-    }
   }
 
   Future<void> _initializeVideo() async {
@@ -110,7 +84,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _isLoading = false;
       });
 
-      if (widget.isActive && !widget.pauseNotifier.value) {
+      if (widget.autoPlay) {
         await play();
       }
 
@@ -133,9 +107,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Future<void> play() async {
     if (_controller != null && _isInitialized) {
-      final videoId = widget.video['id']?.toString() ?? '';
-      await _stateManager.pauseAllExcept(videoId);
-      await _stateManager.play(videoId);
+      await _controller!.play();
       setState(() {
         _isPlaying = true;
       });
@@ -144,8 +116,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Future<void> pause() async {
     if (_controller != null && _isInitialized) {
-      final videoId = widget.video['id']?.toString() ?? '';
-      await _stateManager.pause(videoId);
+      await _controller!.pause();
       setState(() {
         _isPlaying = false;
       });
@@ -182,59 +153,62 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      height: double.infinity,
-      color: Colors.black,
-      child: Stack(
-        children: [
-          // Lecteur vidéo ou placeholder
-          if (_isInitialized && _controller != null)
-            Positioned.fill(
-              child: Center(
+      height: 250,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          children: [
+            // Lecteur vidéo ou placeholder
+            if (_isInitialized && _controller != null)
+              Positioned.fill(
                 child: AspectRatio(
                   aspectRatio: _controller!.value.aspectRatio,
                   child: VideoPlayer(_controller!),
                 ),
-              ),
-            )
-          else if (_isLoading)
-            _buildLoadingState()
-          else if (_error != null)
-            _buildErrorState()
-          else
-            _buildThumbnailState(),
+              )
+            else if (_isLoading)
+              _buildLoadingState()
+            else if (_error != null)
+              _buildErrorState()
+            else
+              _buildThumbnailState(),
 
-          // Overlay tactile
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: _toggleControls,
-              child: Container(
-                color: Colors.transparent,
-              ),
-            ),
-          ),
-
-          // Indicateur de buffering
-          if (_controller != null && 
-              _controller!.value.isInitialized && 
-              _controller!.value.isBuffering)
-            const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+            // Overlay tactile
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  if (widget.onTap != null) {
+                    widget.onTap!();
+                  } else {
+                    _toggleControls();
+                  }
+                },
+                child: Container(
+                  color: Colors.transparent,
+                ),
               ),
             ),
 
-          // Contrôles vidéo
-          if (_showControls && _isInitialized)
-            AnimatedBuilder(
-              animation: _controlsAnimation,
-              builder: (context, child) {
-                return Opacity(
-                  opacity: _controlsAnimation.value,
-                  child: _buildControls(),
-                );
-              },
-            ),
-        ],
+            // Contrôles vidéo
+            if (widget.showControls && _isInitialized)
+              AnimatedBuilder(
+                animation: _controlsAnimation,
+                builder: (context, child) {
+                  return Opacity(
+                    opacity: _controlsAnimation.value,
+                    child: _buildControls(),
+                  );
+                },
+              ),
+
+            // Informations vidéo
+            _buildVideoInfo(),
+          ],
+        ),
       ),
     );
   }
@@ -367,9 +341,6 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
             ),
           ),
         ),
-
-        // Informations vidéo
-        _buildVideoInfo(),
       ],
     );
   }
@@ -384,7 +355,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Colors.black.withOpacity(0.7),
+              Colors.black.withOpacity(0.3),
               Colors.transparent,
               Colors.black.withOpacity(0.7),
             ],
@@ -392,135 +363,37 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
         child: Column(
           children: [
-            // Contrôles du haut
-            Container(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.video['title'] ?? 'Vidéo sans titre',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (widget.onRecipePressed != null)
-                    IconButton(
-                      onPressed: widget.onRecipePressed,
-                      icon: const Icon(
-                        Icons.restaurant_menu,
-                        color: Colors.white,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            
             const Spacer(),
-            
-            // Bouton play/pause central
-            Center(
-              child: GestureDetector(
-                onTap: _togglePlayPause,
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.7),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
+            // Contrôles principaux
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  onPressed: _togglePlayPause,
+                  icon: Icon(
                     _isPlaying ? Icons.pause : Icons.play_arrow,
                     color: Colors.white,
-                    size: 48,
+                    size: 32,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Barre de progression
+            if (_controller != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: VideoProgressIndicator(
+                  _controller!,
+                  allowScrubbing: true,
+                  colors: const VideoProgressColors(
+                    playedColor: AppColors.primary,
+                    bufferedColor: Colors.white30,
+                    backgroundColor: Colors.white12,
                   ),
                 ),
               ),
-            ),
-            
-            const Spacer(),
-            
-            // Contrôles du bas
-            Container(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  // Barre de progression
-                  if (_controller != null)
-                    VideoProgressIndicator(
-                      _controller!,
-                      allowScrubbing: true,
-                      colors: const VideoProgressColors(
-                        playedColor: AppColors.primary,
-                        bufferedColor: Colors.white30,
-                        backgroundColor: Colors.white12,
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                  
-                  // Temps et informations
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _controller != null 
-                            ? _formatDuration(_controller!.value.position)
-                            : '0:00',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.favorite_border,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${widget.video['likes'] ?? 0}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          const Icon(
-                            Icons.visibility,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${widget.video['views'] ?? 0}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        _controller != null 
-                            ? _formatDuration(_controller!.value.duration)
-                            : _formatDuration(Duration(seconds: widget.video['duration'] ?? 0)),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -557,7 +430,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 ),
                 if (widget.video['duration'] != null)
                   Text(
-                    _formatDuration(Duration(seconds: widget.video['duration'])),
+                    _formatDuration(widget.video['duration']),
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 12,
@@ -578,10 +451,10 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final minutes = twoDigits(duration.inMinutes.remainder(60));
-    final seconds = twoDigits(duration.inSeconds.remainder(60));
-    return '$minutes:$seconds';
+  String _formatDuration(int seconds) {
+    final duration = Duration(seconds: seconds);
+    final minutes = duration.inMinutes;
+    final remainingSeconds = duration.inSeconds % 60;
+    return '${minutes}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 }
