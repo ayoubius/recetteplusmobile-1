@@ -26,9 +26,37 @@ class VideoService {
 
   // Récupérer les vidéos avec pagination infinie
   static Future<List<Map<String, dynamic>>> getInfiniteVideos({
-    String? searchQuery,
+    required int offset,
+    required int batchSize,
+    List<String> excludeIds = const [],
+  }) async {
+    try {
+      if (SupabaseService.isInitialized) {
+        var query = SupabaseService.client.from('videos').select('*');
+        if (excludeIds.isNotEmpty) {
+          query = query.not('id', 'in', '(${excludeIds.join(',')})');
+        }
+        final videos = await query
+            .order('created_at', ascending: false)
+            .range(offset, offset + batchSize - 1);
+        if (videos.isNotEmpty) {
+          return videos;
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur VideoService.getInfiniteVideos: $e');
+      }
+      return [];
+    }
+    return [];
+  }
+
+  // Rechercher des vidéos
+  static Future<List<Map<String, dynamic>>> searchVideos({
+    required String searchQuery,
     String? category,
-    int limit = 10,
+    int limit = 20,
     int offset = 0,
   }) async {
     try {
@@ -37,26 +65,6 @@ class VideoService {
         category: category,
         limit: limit,
         offset: offset,
-      );
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur VideoService.getInfiniteVideos: $e');
-      }
-      return [];
-    }
-  }
-
-  // Rechercher des vidéos
-  static Future<List<Map<String, dynamic>>> searchVideos({
-    required String query,
-    String? category,
-    int limit = 20,
-  }) async {
-    try {
-      return await SupabaseService.getVideos(
-        searchQuery: query,
-        category: category,
-        limit: limit,
       );
     } catch (e) {
       if (kDebugMode) {
@@ -153,16 +161,13 @@ class VideoService {
 
         if (currentVideo != null) {
           final currentLikes = currentVideo['likes'] as int? ?? 0;
-          await SupabaseService.client
-              .from('videos')
-              .update({'likes': (currentLikes - 1).clamp(0, double.infinity).toInt()})
-              .eq('id', videoId);
+          await SupabaseService.client.from('videos').update({
+            'likes': (currentLikes - 1).clamp(0, double.infinity).toInt()
+          }).eq('id', videoId);
         }
       } else {
         // Ajouter le like
-        await SupabaseService.client
-            .from('video_likes')
-            .insert({
+        await SupabaseService.client.from('video_likes').insert({
           'user_id': user.id,
           'video_id': videoId,
           'created_at': DateTime.now().toIso8601String(),
@@ -179,8 +184,7 @@ class VideoService {
           final currentLikes = currentVideo['likes'] as int? ?? 0;
           await SupabaseService.client
               .from('videos')
-              .update({'likes': currentLikes + 1})
-              .eq('id', videoId);
+              .update({'likes': currentLikes + 1}).eq('id', videoId);
         }
       }
     } catch (e) {

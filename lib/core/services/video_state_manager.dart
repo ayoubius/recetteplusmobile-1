@@ -1,6 +1,23 @@
 import 'package:flutter/foundation.dart';
 import 'package:video_player/video_player.dart';
 
+// Video state for use in widgets and state manager
+enum VideoState { loading, playing, paused, error, stopped }
+
+// Video quality enum for selection
+enum VideoQuality { auto, low, medium, high }
+
+class VideoInfo {
+  final VideoState state;
+  final String? errorMessage;
+  final VideoPlayerController? controller;
+  VideoInfo({
+    required this.state,
+    this.errorMessage,
+    this.controller,
+  });
+}
+
 class VideoStateManager {
   static final VideoStateManager _instance = VideoStateManager._internal();
   factory VideoStateManager() => _instance;
@@ -9,6 +26,8 @@ class VideoStateManager {
   final Map<String, VideoPlayerController> _controllers = {};
   final Map<String, bool> _isPlaying = {};
   final Map<String, bool> _isInitialized = {};
+  final List<VoidCallback> _listeners = [];
+  final Map<String, VideoInfo> _videoInfos = {};
 
   VideoPlayerController? getController(String videoId) {
     return _controllers[videoId];
@@ -22,7 +41,83 @@ class VideoStateManager {
     return _isInitialized[videoId] ?? false;
   }
 
-  Future<VideoPlayerController> initializeController(String videoId, String videoUrl) async {
+  // Add a listener for state changes
+  void addListener(VoidCallback listener) {
+    _listeners.add(listener);
+  }
+
+  // Remove a listener
+  void removeListener(VoidCallback listener) {
+    _listeners.remove(listener);
+  }
+
+  // Notify listeners
+  void _notifyListeners() {
+    for (final listener in _listeners) {
+      listener();
+    }
+  }
+
+  // Get video info for a videoId
+  VideoInfo? getVideoInfo(String videoId) {
+    return _videoInfos[videoId];
+  }
+
+  // Initialize video and update state
+  Future<VideoPlayerController?> initializeVideo({
+    required String videoId,
+    required String videoUrl,
+    String? title,
+    VideoQuality? quality,
+  }) async {
+    try {
+      _videoInfos[videoId] = VideoInfo(state: VideoState.loading);
+      _notifyListeners();
+      final controller = await initializeController(videoId, videoUrl);
+      _videoInfos[videoId] =
+          VideoInfo(state: VideoState.paused, controller: controller);
+      _notifyListeners();
+      return controller;
+    } catch (e) {
+      _videoInfos[videoId] =
+          VideoInfo(state: VideoState.error, errorMessage: e.toString());
+      _notifyListeners();
+      return null;
+    }
+  }
+
+  // Play video and update state
+  Future<void> playVideo(String videoId) async {
+    try {
+      await play(videoId);
+      final controller = _controllers[videoId];
+      _videoInfos[videoId] =
+          VideoInfo(state: VideoState.playing, controller: controller);
+      _notifyListeners();
+    } catch (e) {
+      _videoInfos[videoId] =
+          VideoInfo(state: VideoState.error, errorMessage: e.toString());
+      _notifyListeners();
+    }
+  }
+
+  // Pause video and update state
+  Future<void> pauseVideo(String videoId) async {
+    try {
+      await pause(videoId);
+      final controller = _controllers[videoId];
+      _videoInfos[videoId] =
+          VideoInfo(state: VideoState.paused, controller: controller);
+      _notifyListeners();
+    } catch (e) {
+      _videoInfos[videoId] =
+          VideoInfo(state: VideoState.error, errorMessage: e.toString());
+      _notifyListeners();
+    }
+  }
+
+  Future<VideoPlayerController> initializeController(
+      String videoId, String videoUrl) async {
     try {
       if (_controllers.containsKey(videoId)) {
         return _controllers[videoId]!;
@@ -30,10 +125,10 @@ class VideoStateManager {
 
       final controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
       _controllers[videoId] = controller;
-      
+
       await controller.initialize();
       _isInitialized[videoId] = true;
-      
+
       // Écouter les changements d'état
       controller.addListener(() {
         _isPlaying[videoId] = controller.value.isPlaying;
@@ -58,7 +153,7 @@ class VideoStateManager {
       if (controller != null && controller.value.isInitialized) {
         await controller.play();
         _isPlaying[videoId] = true;
-        
+
         if (kDebugMode) {
           print('▶️ Lecture démarrée pour: $videoId');
         }
@@ -76,7 +171,7 @@ class VideoStateManager {
       if (controller != null && controller.value.isInitialized) {
         await controller.pause();
         _isPlaying[videoId] = false;
-        
+
         if (kDebugMode) {
           print('⏸️ Lecture mise en pause pour: $videoId');
         }
@@ -93,7 +188,7 @@ class VideoStateManager {
       final controller = _controllers[videoId];
       if (controller != null && controller.value.isInitialized) {
         await controller.seekTo(position);
-        
+
         if (kDebugMode) {
           print('⏭️ Saut à la position ${position.inSeconds}s pour: $videoId');
         }
@@ -121,7 +216,7 @@ class VideoStateManager {
         _controllers.remove(videoId);
         _isPlaying.remove(videoId);
         _isInitialized.remove(videoId);
-        
+
         if (kDebugMode) {
           print('🗑️ Contrôleur vidéo supprimé pour: $videoId');
         }
@@ -141,7 +236,7 @@ class VideoStateManager {
       _controllers.clear();
       _isPlaying.clear();
       _isInitialized.clear();
-      
+
       if (kDebugMode) {
         print('🗑️ Tous les contrôleurs vidéo supprimés');
       }

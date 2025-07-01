@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import '../../../../core/services/video_service.dart';
 import '../../../../core/constants/app_colors.dart';
-import '../widgets/video_player_widget.dart';
+import '../widgets/enhanced_video_player_widget.dart';
 import '../widgets/recipe_drawer.dart';
 
 class VideosPage extends StatefulWidget {
@@ -23,9 +23,9 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _videos = [];
   List<Map<String, dynamic>> _filteredVideos = [];
   List<Map<String, dynamic>> _searchResults = [];
-  
+
   // Cache des contrôleurs vidéo pour optimiser les performances
-  final Map<int, GlobalKey<VideoPlayerWidgetState>> _videoKeys = {};
+  final Map<int, GlobalKey> _videoKeys = {};
   final Set<int> _preloadedIndices = {};
 
   bool _isLoading = true;
@@ -82,23 +82,24 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
   void _onActiveVideoChanged() {
     // Gérer la lecture/pause des vidéos basée sur l'index actif
     _manageVideoPlayback();
-    
+
     // Précharger les vidéos adjacentes
     _preloadAdjacentVideos();
   }
 
   void _manageVideoPlayback() {
     final activeIndex = _activeVideoIndex.value;
-    
+
     for (int i = 0; i < _filteredVideos.length; i++) {
       final key = _videoKeys[i];
       if (key?.currentState != null) {
+        final state = key!.currentState as dynamic;
         if (i == activeIndex && !_showRecipeDrawer) {
           // Jouer la vidéo active
-          key!.currentState!.play();
+          state.play();
         } else {
           // Mettre en pause les autres vidéos
-          key!.currentState!.pause();
+          state.pause();
         }
       }
     }
@@ -107,11 +108,15 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
   void _preloadAdjacentVideos() {
     final activeIndex = _activeVideoIndex.value;
     final preloadRange = 2; // Précharger 2 vidéos avant et après
-    
+
     _preloadTimer?.cancel();
     _preloadTimer = Timer(const Duration(milliseconds: 500), () {
-      for (int i = activeIndex - preloadRange; i <= activeIndex + preloadRange; i++) {
-        if (i >= 0 && i < _filteredVideos.length && !_preloadedIndices.contains(i)) {
+      for (int i = activeIndex - preloadRange;
+          i <= activeIndex + preloadRange;
+          i++) {
+        if (i >= 0 &&
+            i < _filteredVideos.length &&
+            !_preloadedIndices.contains(i)) {
           _preloadVideoAt(i);
         }
       }
@@ -120,10 +125,11 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
 
   void _preloadVideoAt(int index) {
     if (_preloadedIndices.contains(index)) return;
-    
+
     final key = _videoKeys[index];
     if (key?.currentState != null) {
-      key!.currentState!.preloadVideo();
+      final state = key!.currentState as dynamic;
+      state.preloadVideo();
       _preloadedIndices.add(index);
     }
   }
@@ -180,10 +186,10 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
         _filteredVideos = videos;
         _isLoading = false;
         _hasMoreVideos = videos.length >= _videosPerPage;
-        
+
         // Créer les clés pour les widgets vidéo
         for (int i = 0; i < _filteredVideos.length; i++) {
-          _videoKeys[i] = GlobalKey<VideoPlayerWidgetState>();
+          _videoKeys[i] = GlobalKey();
         }
       });
 
@@ -231,17 +237,17 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
 
       if (moreVideos.isNotEmpty) {
         final startIndex = _filteredVideos.length;
-        
+
         setState(() {
           _videos.addAll(moreVideos);
           _filteredVideos = _filterVideosByCategory(_videos, _selectedCategory);
           _currentPage = nextPage;
           _isLoadingMore = false;
           _hasMoreVideos = moreVideos.length >= _videosPerPage;
-          
+
           // Créer les clés pour les nouvelles vidéos
           for (int i = startIndex; i < _filteredVideos.length; i++) {
-            _videoKeys[i] = GlobalKey<VideoPlayerWidgetState>();
+            _videoKeys[i] = GlobalKey();
           }
         });
       } else {
@@ -280,11 +286,11 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
       _filteredVideos = _filterVideosByCategory(_videos, category);
       _currentIndex = 0;
       _preloadedIndices.clear();
-      
+
       // Recréer les clés pour les vidéos filtrées
       _videoKeys.clear();
       for (int i = 0; i < _filteredVideos.length; i++) {
-        _videoKeys[i] = GlobalKey<VideoPlayerWidgetState>();
+        _videoKeys[i] = GlobalKey();
       }
     });
 
@@ -312,7 +318,7 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
     });
 
     try {
-      final results = await VideoService.searchVideos(query);
+      final results = await VideoService.searchVideos(searchQuery: query);
       setState(() {
         _searchResults = results;
         _isSearching = false;
@@ -338,7 +344,7 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
       _currentRecipeId = recipeId;
       _showRecipeDrawer = true;
     });
-    
+
     // Mettre en pause toutes les vidéos quand le drawer s'ouvre
     _shouldPauseAllVideos.value = true;
   }
@@ -348,7 +354,7 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
       _showRecipeDrawer = false;
       _currentRecipeId = null;
     });
-    
+
     // Reprendre la lecture de la vidéo active
     _shouldPauseAllVideos.value = false;
     Future.delayed(const Duration(milliseconds: 300), () {
@@ -443,7 +449,7 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
             setState(() {
               _currentIndex = index;
             });
-            
+
             _activeVideoIndex.value = index;
 
             // Charger plus de vidéos quand on approche de la fin
@@ -467,14 +473,16 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
             return ValueListenableBuilder<int>(
               valueListenable: _activeVideoIndex,
               builder: (context, activeIndex, child) {
-                return VideoPlayerWidget(
+                return EnhancedVideoPlayerWidget(
                   key: _videoKeys[index],
                   video: video,
                   isActive: index == activeIndex && !_showRecipeDrawer,
-                  pauseNotifier: _shouldPauseAllVideos,
                   onRecipePressed: video['recipe_id'] != null
                       ? () => _openRecipeDrawer(video['recipe_id'])
                       : null,
+                  autoPlay: true,
+                  showControls: true,
+                  enableGestures: true,
                 );
               },
             );
@@ -741,7 +749,7 @@ class _VideosPageState extends State<VideosPage> with WidgetsBindingObserver {
           _currentIndex = 0;
           _preloadedIndices.clear();
           _videoKeys.clear();
-          _videoKeys[0] = GlobalKey<VideoPlayerWidgetState>();
+          _videoKeys[0] = GlobalKey();
         });
 
         _pageController.animateToPage(

@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:async';
 import '../../../../core/constants/app_colors.dart';
-import '../../../../core/services/video_state_manager.dart';
+import '../../../../core/services/video_state_manager.dart'; // VideoState, VideoQuality
 
 class EnhancedVideoPlayerWidget extends StatefulWidget {
   final Map<String, dynamic> video;
@@ -15,7 +15,7 @@ class EnhancedVideoPlayerWidget extends StatefulWidget {
   final bool enableGestures;
 
   const EnhancedVideoPlayerWidget({
-    Key? key,
+    super.key, // use super parameter
     required this.video,
     required this.isActive,
     this.onRecipePressed,
@@ -23,7 +23,7 @@ class EnhancedVideoPlayerWidget extends StatefulWidget {
     this.autoPlay = true,
     this.showControls = true,
     this.enableGestures = true,
-  }) : super(key: key);
+  });
 
   @override
   State<EnhancedVideoPlayerWidget> createState() =>
@@ -319,6 +319,34 @@ class _EnhancedVideoPlayerWidgetState extends State<EnhancedVideoPlayerWidget>
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
+  int _parseDuration(dynamic duration) {
+    if (duration == null) return 0;
+    if (duration is int) return duration;
+    if (duration is String) return int.tryParse(duration) ?? 0;
+    return 0;
+  }
+
+  // --- PUBLIC CONTROL METHODS FOR PARENT ---
+  Future<void> play() async {
+    final controller = _stateManager.getController(_videoId);
+    if (controller != null && controller.value.isInitialized) {
+      await controller.play();
+      setState(() {});
+    }
+  }
+
+  Future<void> pause() async {
+    final controller = _stateManager.getController(_videoId);
+    if (controller != null && controller.value.isInitialized) {
+      await controller.pause();
+      setState(() {});
+    }
+  }
+
+  Future<void> preloadVideo() async {
+    await _initializeVideo();
+  }
+
   @override
   void dispose() {
     _hideControlsTimer?.cancel();
@@ -526,7 +554,8 @@ class _EnhancedVideoPlayerWidgetState extends State<EnhancedVideoPlayerWidget>
                                   vertical: 4,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.5),
+                                  color: Colors.black
+                                      .withAlpha((0.5 * 255).toInt()),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
@@ -546,12 +575,14 @@ class _EnhancedVideoPlayerWidgetState extends State<EnhancedVideoPlayerWidget>
                                   vertical: 4,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.5),
+                                  color: Colors.black
+                                      .withAlpha((0.5 * 255).toInt()),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
                                   _formatDuration(Duration(
-                                      seconds: widget.video['duration'])),
+                                    seconds: _parseDuration(widget.video['duration']),
+                                  )),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12,
@@ -617,7 +648,7 @@ class _EnhancedVideoPlayerWidgetState extends State<EnhancedVideoPlayerWidget>
             decoration: BoxDecoration(
               color: isHighlighted
                   ? AppColors.primary
-                  : Colors.black.withOpacity(0.5),
+                  : Colors.black.withAlpha((0.5 * 255).toInt()),
               borderRadius: BorderRadius.circular(24),
             ),
             child: Icon(
@@ -655,45 +686,61 @@ class _EnhancedVideoPlayerWidgetState extends State<EnhancedVideoPlayerWidget>
         return Opacity(
           opacity: _controlsAnimation.value,
           child: Container(
-            color: Colors.black.withOpacity(0.3),
-            child: Center(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    onPressed: () {
-                      _seekRelative(const Duration(seconds: -10));
-                      HapticFeedback.lightImpact();
-                    },
-                    icon: const Icon(
-                      Icons.replay_10,
-                      color: Colors.white,
-                      size: 32,
+            color: Colors.black.withAlpha((0.3 * 255).toInt()),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      onPressed: () {
+                        _seekRelative(const Duration(seconds: -10));
+                        HapticFeedback.lightImpact();
+                      },
+                      icon: const Icon(
+                        Icons.replay_10,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                    const SizedBox(width: 32),
+                    IconButton(
+                      onPressed: _togglePlayPause,
+                      icon: Icon(
+                        isPlaying ? Icons.pause : Icons.play_arrow,
+                        color: Colors.white,
+                        size: 48,
+                      ),
+                    ),
+                    const SizedBox(width: 32),
+                    IconButton(
+                      onPressed: () {
+                        _seekRelative(const Duration(seconds: 10));
+                        HapticFeedback.lightImpact();
+                      },
+                      icon: const Icon(
+                        Icons.forward_10,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                  ],
+                ),
+                if (controller.value.isInitialized)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                    child: VideoProgressIndicator(
+                      controller,
+                      allowScrubbing: true,
+                      colors: const VideoProgressColors(
+                        playedColor: AppColors.primary,
+                        bufferedColor: Colors.white30,
+                        backgroundColor: Colors.white12,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 32),
-                  IconButton(
-                    onPressed: _togglePlayPause,
-                    icon: Icon(
-                      isPlaying ? Icons.pause : Icons.play_arrow,
-                      color: Colors.white,
-                      size: 48,
-                    ),
-                  ),
-                  const SizedBox(width: 32),
-                  IconButton(
-                    onPressed: () {
-                      _seekRelative(const Duration(seconds: 10));
-                      HapticFeedback.lightImpact();
-                    },
-                    icon: const Icon(
-                      Icons.forward_10,
-                      color: Colors.white,
-                      size: 32,
-                    ),
-                  ),
-                ],
-              ),
+              ],
             ),
           ),
         );

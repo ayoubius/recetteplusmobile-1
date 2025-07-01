@@ -8,6 +8,9 @@ class VideoPlayerWidget extends StatefulWidget {
   final VoidCallback? onTap;
   final bool autoPlay;
   final bool showControls;
+  final bool isActive;
+  final ValueNotifier<bool>? pauseNotifier;
+  final VoidCallback? onRecipePressed;
 
   const VideoPlayerWidget({
     super.key,
@@ -15,6 +18,9 @@ class VideoPlayerWidget extends StatefulWidget {
     this.onTap,
     this.autoPlay = false,
     this.showControls = true,
+    this.isActive = false,
+    this.pauseNotifier,
+    this.onRecipePressed,
   });
 
   @override
@@ -30,7 +36,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
   bool _showControls = true;
   bool _isLoading = false;
   String? _error;
-  
+
   late AnimationController _controlsAnimationController;
   late Animation<double> _controlsAnimation;
 
@@ -76,7 +82,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final videoUrl = widget.video['video_url']?.toString() ?? '';
 
       _controller = await _stateManager.initializeController(videoId, videoUrl);
-      
+
       _controller!.addListener(_onVideoStateChanged);
 
       setState(() {
@@ -430,7 +436,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 ),
                 if (widget.video['duration'] != null)
                   Text(
-                    _formatDuration(widget.video['duration']),
+                    _formatDuration(_parseDuration(widget.video['duration'])),
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 12,
@@ -449,6 +455,13 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ],
       ),
     );
+  }
+
+  int _parseDuration(dynamic duration) {
+    if (duration == null) return 0;
+    if (duration is int) return duration;
+    if (duration is String) return int.tryParse(duration) ?? 0;
+    return 0;
   }
 
   String _formatDuration(int seconds) {
