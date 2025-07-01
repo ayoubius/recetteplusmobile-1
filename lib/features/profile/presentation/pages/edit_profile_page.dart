@@ -23,7 +23,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   final _phoneController = TextEditingController();
   final _bioController = TextEditingController();
   final _locationController = TextEditingController();
-  
+
   bool _isLoading = false;
   bool _isLoadingProfile = true;
   bool _isUploadingImage = false;
@@ -56,10 +56,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
         final profile = await SupabaseService.getUserProfile(user.id);
-        
+
         if (mounted) {
           setState(() {
-            _displayNameController.text = profile?['display_name'] ?? user.userMetadata?['display_name'] ?? '';
+            _displayNameController.text = profile?['display_name'] ??
+                user.userMetadata?['display_name'] ??
+                '';
             _emailController.text = user.email ?? '';
             _phoneController.text = profile?['phone_number'] ?? '';
             _bioController.text = profile?['bio'] ?? '';
@@ -95,7 +97,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
 
       // Normaliser le numéro de téléphone
-      final normalizedPhone = PhoneValidator.normalizePhone(_phoneController.text.trim());
+      final normalizedPhone =
+          PhoneValidator.normalizePhone(_phoneController.text.trim());
 
       // Mettre à jour les métadonnées utilisateur
       await Supabase.instance.client.auth.updateUser(
@@ -108,15 +111,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       // Mettre à jour le profil dans la base de données
       await SupabaseService.updateUserProfile(
-        uid: user.id,
-        displayName: _displayNameController.text.trim(),
-        phoneNumber: normalizedPhone,
+        userId: user.id,
+        firstName: _displayNameController.text.trim(),
+        phone: normalizedPhone,
         additionalData: {
-          'bio': _bioController.text.trim().isNotEmpty 
-              ? _bioController.text.trim() 
+          'bio': _bioController.text.trim().isNotEmpty
+              ? _bioController.text.trim()
               : null,
-          'location': _locationController.text.trim().isNotEmpty 
-              ? _locationController.text.trim() 
+          'location': _locationController.text.trim().isNotEmpty
+              ? _locationController.text.trim()
               : null,
         },
       );
@@ -125,7 +128,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
         setState(() {
           _successMessage = 'Profil mis à jour avec succès';
         });
-        
+
         // Masquer le message de succès après 3 secondes
         Future.delayed(const Duration(seconds: 3), () {
           if (mounted) {
@@ -203,18 +206,19 @@ class _EditProfilePageState extends State<EditProfilePage> {
         setState(() {
           _isUploadingImage = false;
         });
-        
+
         String errorMessage = 'Erreur lors de l\'upload de l\'image';
-        
+
         // Messages d'erreur plus spécifiques
         if (e.toString().contains('Permission')) {
-          errorMessage = 'Permission refusée. Vérifiez les paramètres de l\'app.';
+          errorMessage =
+              'Permission refusée. Vérifiez les paramètres de l\'app.';
         } else if (e.toString().contains('trop volumineuse')) {
           errorMessage = 'Image trop volumineuse (max 5MB)';
         } else if (e.toString().contains('format')) {
           errorMessage = 'Format d\'image non supporté';
         }
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMessage),
@@ -233,7 +237,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       backgroundColor: AppColors.getBackground(isDark),
       appBar: AppBar(
@@ -277,7 +281,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
                               child: _isUploadingImage
                                   ? const Center(
                                       child: CircularProgressIndicator(
-                                        valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                                AppColors.primary),
                                       ),
                                     )
                                   : ClipOval(
@@ -287,7 +293,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                               fit: BoxFit.cover,
                                               width: 120,
                                               height: 120,
-                                              errorBuilder: (context, error, stackTrace) {
+                                              errorBuilder:
+                                                  (context, error, stackTrace) {
                                                 return const Icon(
                                                   Icons.person,
                                                   size: 60,
@@ -306,7 +313,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
                               bottom: 0,
                               right: 0,
                               child: GestureDetector(
-                                onTap: _isUploadingImage ? null : _changeProfilePicture,
+                                onTap: _isUploadingImage
+                                    ? null
+                                    : _changeProfilePicture,
                                 child: Container(
                                   width: 36,
                                   height: 36,
@@ -315,7 +324,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                     color: AppColors.primary,
                                     boxShadow: [
                                       BoxShadow(
-                                        color: AppColors.primary.withOpacity(0.3),
+                                        color:
+                                            AppColors.primary.withOpacity(0.3),
                                         blurRadius: 8,
                                         offset: const Offset(0, 2),
                                       ),
@@ -488,25 +498,33 @@ class _EditProfilePageState extends State<EditProfilePage> {
                             final shouldSignOut = await showDialog<bool>(
                               context: context,
                               builder: (context) => AlertDialog(
-                                backgroundColor: AppColors.getCardBackground(isDark),
+                                backgroundColor:
+                                    AppColors.getCardBackground(isDark),
                                 title: Text(
                                   'Déconnexion',
-                                  style: TextStyle(color: AppColors.getTextPrimary(isDark)),
+                                  style: TextStyle(
+                                      color: AppColors.getTextPrimary(isDark)),
                                 ),
                                 content: Text(
                                   'Êtes-vous sûr de vouloir vous déconnecter ?',
-                                  style: TextStyle(color: AppColors.getTextSecondary(isDark)),
+                                  style: TextStyle(
+                                      color:
+                                          AppColors.getTextSecondary(isDark)),
                                 ),
                                 actions: [
                                   TextButton(
-                                    onPressed: () => Navigator.pop(context, false),
+                                    onPressed: () =>
+                                        Navigator.pop(context, false),
                                     child: Text(
                                       'Annuler',
-                                      style: TextStyle(color: AppColors.getTextSecondary(isDark)),
+                                      style: TextStyle(
+                                          color: AppColors.getTextSecondary(
+                                              isDark)),
                                     ),
                                   ),
                                   TextButton(
-                                    onPressed: () => Navigator.pop(context, true),
+                                    onPressed: () =>
+                                        Navigator.pop(context, true),
                                     child: const Text(
                                       'Déconnexion',
                                       style: TextStyle(color: Colors.red),

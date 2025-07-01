@@ -6,7 +6,8 @@ class SupabaseService {
 
   static SupabaseClient get client {
     if (_client == null) {
-      throw Exception('Supabase n\'est pas initialisé. Appelez initialize() d\'abord.');
+      throw Exception(
+          'Supabase n\'est pas initialisé. Appelez initialize() d\'abord.');
     }
     return _client!;
   }
@@ -23,10 +24,10 @@ class SupabaseService {
         anonKey: anonKey,
         debug: true, // Pour le développement
       );
-      
+
       _client = Supabase.instance.client;
       _isInitialized = true;
-      
+
       print('Supabase initialisé avec succès');
     } catch (e) {
       print('Erreur lors de l\'initialisation de Supabase: $e');
@@ -41,7 +42,7 @@ class SupabaseService {
   }
 
   // Méthodes utilitaires pour les requêtes communes
-  static Future<PostgrestResponse<List<Map<String, dynamic>>>> select(
+  static Future<List<Map<String, dynamic>>> select(
     String table, {
     String columns = '*',
     Map<String, dynamic>? filters,
@@ -56,31 +57,34 @@ class SupabaseService {
 
     var query = _client!.from(table).select(columns);
 
-    // Appliquer les filtres
     if (filters != null) {
       filters.forEach((key, value) {
         query = query.eq(key, value);
       });
     }
 
-    // Appliquer l'ordre
     if (orderBy != null) {
-      query = query.order(orderBy, ascending: ascending);
-    }
-
-    // Appliquer la pagination
-    if (limit != null) {
-      if (offset != null) {
-        query = query.range(offset, offset + limit - 1);
+      if (limit != null && offset != null) {
+        return await query
+            .order(orderBy, ascending: ascending)
+            .range(offset, offset + limit - 1);
+      } else if (limit != null) {
+        return await query.order(orderBy, ascending: ascending).limit(limit);
       } else {
-        query = query.limit(limit);
+        return await query.order(orderBy, ascending: ascending);
+      }
+    } else {
+      if (limit != null && offset != null) {
+        return await query.range(offset, offset + limit - 1);
+      } else if (limit != null) {
+        return await query.limit(limit);
+      } else {
+        return await query;
       }
     }
-
-    return await query.execute();
   }
 
-  static Future<PostgrestResponse<List<Map<String, dynamic>>>> insert(
+  static Future<List<Map<String, dynamic>>> insert(
     String table,
     Map<String, dynamic> data,
   ) async {
@@ -88,10 +92,11 @@ class SupabaseService {
       throw Exception('Supabase n\'est pas initialisé');
     }
 
-    return await _client!.from(table).insert(data).execute();
+    final response = await _client!.from(table).insert(data);
+    return response;
   }
 
-  static Future<PostgrestResponse<List<Map<String, dynamic>>>> update(
+  static Future<List<Map<String, dynamic>>> update(
     String table,
     Map<String, dynamic> data, {
     required Map<String, dynamic> filters,
@@ -106,10 +111,11 @@ class SupabaseService {
       query = query.eq(key, value);
     });
 
-    return await query.execute();
+    final response = await query;
+    return response;
   }
 
-  static Future<PostgrestResponse<List<Map<String, dynamic>>>> delete(
+  static Future<List<Map<String, dynamic>>> delete(
     String table, {
     required Map<String, dynamic> filters,
   }) async {
@@ -123,6 +129,293 @@ class SupabaseService {
       query = query.eq(key, value);
     });
 
-    return await query.execute();
+    final response = await query;
+    return response;
+  }
+
+  // Méthodes spécifiques pour les recettes
+  static Future<List<Map<String, dynamic>>> getRecipes({
+    String? searchQuery,
+    String? category,
+    String? difficulty,
+    int? maxPrepTime,
+    double? minRating,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      var query = _client!.from('recipes').select('*');
+
+      // Appliquer les filtres
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        query = query
+            .or('title.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
+      }
+
+      if (category != null && category.isNotEmpty) {
+        query = query.eq('category', category);
+      }
+
+      if (difficulty != null && difficulty.isNotEmpty) {
+        query = query.eq('difficulty', difficulty);
+      }
+
+      if (maxPrepTime != null) {
+        query = query.lte('prep_time', maxPrepTime);
+      }
+
+      if (minRating != null) {
+        query = query.gte('rating', minRating);
+      }
+
+      final response = await query
+          .order('rating', ascending: false)
+          .order('created_at', ascending: false)
+          .range(offset, offset + limit - 1);
+
+      return response;
+    } catch (e) {
+      print('❌ Erreur lors de la récupération des recettes: $e');
+      return [];
+    }
+  }
+
+  // Méthodes spécifiques pour les produits
+  static Future<List<Map<String, dynamic>>> getProducts({
+    String? searchQuery,
+    String? category,
+    double? minPrice,
+    double? maxPrice,
+    bool? inStock,
+    int limit = 20,
+    int offset = 0,
+    bool shuffle = false,
+  }) async {
+    if (!_isInitialized) {
+      print('❌ Supabase non initialisé, impossible de récupérer les produits.');
+      return [];
+    }
+    try {
+      var query = _client!.from('products').select('*');
+      // Appliquer les filtres
+      if (searchQuery != null && searchQuery.isNotEmpty) {
+        query = query.or('name.ilike.%$searchQuery%,description.ilike.%$searchQuery%');
+      }
+      if (category != null && category.isNotEmpty) {
+        query = query.eq('category', category);
+      }
+      if (minPrice != null) {
+        query = query.gte('price', minPrice);
+      }
+      if (maxPrice != null) {
+        query = query.lte('price', maxPrice);
+      }
+      if (inStock != null) {
+        query = query.eq('in_stock', inStock);
+      }
+      final response = await query
+          .order('name', ascending: true)
+          .range(offset, offset + limit - 1);
+      List<Map<String, dynamic>> products = List<Map<String, dynamic>>.from(response);
+      if (shuffle && products.isNotEmpty) {
+        products.shuffle();
+      }
+      return products;
+    } catch (e) {
+      print('❌ Erreur lors de la récupération des produits: $e');
+      return [];
+    }
+  }
+
+  // Méthodes pour les profils utilisateur
+  static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
+    try {
+      final response = await _client!
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      return response;
+    } catch (e) {
+      print('❌ Erreur lors de la récupération du profil: $e');
+      return null;
+    }
+  }
+
+  static Future<void> createUserProfile({
+    required String userId,
+    required String email,
+    String? firstName,
+    String? lastName,
+    String? phone,
+    String? avatar,
+  }) async {
+    try {
+      await _client!.from('user_profiles').insert({
+        'user_id': userId,
+        'email': email,
+        'first_name': firstName,
+        'last_name': lastName,
+        'phone': phone,
+        'avatar': avatar,
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('❌ Erreur lors de la création du profil: $e');
+      rethrow;
+    }
+  }
+
+  static Future<void> updateUserProfile({
+    required String userId,
+    String? firstName,
+    String? lastName,
+    String? phone,
+    String? avatar,
+    Map<String, dynamic>? additionalData,
+  }) async {
+    try {
+      Map<String, dynamic> updateData = {
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      if (firstName != null) updateData['first_name'] = firstName;
+      if (lastName != null) updateData['last_name'] = lastName;
+      if (phone != null) updateData['phone'] = phone;
+      if (avatar != null) updateData['avatar'] = avatar;
+      if (additionalData != null) updateData.addAll(additionalData);
+
+      await _client!
+          .from('user_profiles')
+          .update(updateData)
+          .eq('user_id', userId);
+    } catch (e) {
+      print('❌ Erreur lors de la mise à jour du profil: $e');
+      rethrow;
+    }
+  }
+
+  // Méthodes pour les favoris
+  static Future<List<Map<String, dynamic>>> getUserFavorites() async {
+    try {
+      final user = _client!.auth.currentUser;
+      if (user == null) return [];
+
+      final response = await _client!
+          .from('favorites')
+          .select('recipe_id')
+          .eq('user_id', user.id);
+
+      if (response.isNotEmpty) {
+        List<Map<String, dynamic>> recipes = [];
+        for (var favorite in response) {
+          final recipe = await _client!
+              .from('recipes')
+              .select('*')
+              .eq('id', favorite['recipe_id'])
+              .maybeSingle();
+          if (recipe != null) {
+            recipes.add(recipe);
+          }
+        }
+        return recipes;
+      }
+      return [];
+    } catch (e) {
+      print('❌ Erreur lors de la récupération des favoris: $e');
+      return [];
+    }
+  }
+
+  static Future<void> addToFavorites(String itemId, String type) async {
+    try {
+      final user = _client!.auth.currentUser;
+      if (user == null) return;
+
+      await _client!.from('favorites').insert({
+        'user_id': user.id,
+        'recipe_id': itemId,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('❌ Erreur lors de l\'ajout aux favoris: $e');
+      rethrow;
+    }
+  }
+
+  static Future<void> removeFromFavorites(String itemId) async {
+    try {
+      final user = _client!.auth.currentUser;
+      if (user == null) return;
+
+      await _client!
+          .from('favorites')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('recipe_id', itemId);
+    } catch (e) {
+      print('❌ Erreur lors de la suppression des favoris: $e');
+      rethrow;
+    }
+  }
+
+  // Méthodes pour l'historique
+  static Future<List<Map<String, dynamic>>> getUserHistory(
+      {int limit = 20}) async {
+    try {
+      final user = _client!.auth.currentUser;
+      if (user == null) return [];
+
+      final response = await _client!
+          .from('user_history')
+          .select('recipe_id')
+          .eq('user_id', user.id)
+          .order('viewed_at', ascending: false)
+          .limit(limit);
+
+      if (response.isNotEmpty) {
+        List<Map<String, dynamic>> recipes = [];
+        for (var history in response) {
+          final recipe = await _client!
+              .from('recipes')
+              .select('*')
+              .eq('id', history['recipe_id'])
+              .maybeSingle();
+          if (recipe != null) {
+            recipes.add(recipe);
+          }
+        }
+        return recipes;
+      }
+      return [];
+    } catch (e) {
+      print('❌ Erreur lors de la récupération de l\'historique: $e');
+      return [];
+    }
+  }
+
+  static Future<void> addToHistory(String itemId) async {
+    try {
+      final user = _client!.auth.currentUser;
+      if (user == null) return;
+
+      // Supprimer l'entrée existante s'il y en a une
+      await _client!
+          .from('user_history')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('recipe_id', itemId);
+
+      // Ajouter la nouvelle entrée
+      await _client!.from('user_history').insert({
+        'user_id': user.id,
+        'recipe_id': itemId,
+        'viewed_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('⚠️ Erreur lors de l\'ajout à l\'historique: $e');
+    }
   }
 }

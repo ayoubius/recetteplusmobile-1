@@ -30,15 +30,13 @@ class _PrivacyPageState extends State<PrivacyPage> {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
         final profile = await SupabaseService.getUserProfile(user.id);
-        
+
         if (mounted && profile != null) {
           setState(() {
-            _privacySettings = Map<String, dynamic>.from(
-              profile['privacy_settings'] ?? {}
-            );
+            _privacySettings =
+                Map<String, dynamic>.from(profile['privacy_settings'] ?? {});
             _notificationSettings = Map<String, dynamic>.from(
-              profile['notification_settings'] ?? {}
-            );
+                profile['notification_settings'] ?? {});
             _isLoading = false;
           });
         }
@@ -65,7 +63,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
       });
 
       await SupabaseService.updateUserProfile(
-        uid: user.id,
+        userId: user.id,
         additionalData: {
           'privacy_settings': _privacySettings,
         },
@@ -94,7 +92,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
       });
 
       await SupabaseService.updateUserProfile(
-        uid: user.id,
+        userId: user.id,
         additionalData: {
           'notification_settings': _notificationSettings,
         },
@@ -116,7 +114,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       backgroundColor: AppColors.getBackground(isDark),
       appBar: AppBar(
@@ -144,7 +142,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                         'friends': 'Amis seulement',
                         'private': 'Privé',
                       },
-                      onChanged: (value) => _updatePrivacySetting('profile_visibility', value),
+                      onChanged: (value) =>
+                          _updatePrivacySetting('profile_visibility', value),
                       icon: Icons.visibility,
                       isDark: isDark,
                     ),
@@ -158,7 +157,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                         'friends': 'Amis seulement',
                         'private': 'Privé',
                       },
-                      onChanged: (value) => _updatePrivacySetting('email_visibility', value),
+                      onChanged: (value) =>
+                          _updatePrivacySetting('email_visibility', value),
                       icon: Icons.email,
                       isDark: isDark,
                     ),
@@ -172,7 +172,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                         'friends': 'Amis seulement',
                         'private': 'Privé',
                       },
-                      onChanged: (value) => _updatePrivacySetting('phone_visibility', value),
+                      onChanged: (value) =>
+                          _updatePrivacySetting('phone_visibility', value),
                       icon: Icons.phone,
                       isDark: isDark,
                     ),
@@ -180,13 +181,15 @@ class _PrivacyPageState extends State<PrivacyPage> {
                     _buildDropdownTile(
                       title: 'Localisation',
                       subtitle: 'Visibilité de votre localisation',
-                      value: _privacySettings['location_visibility'] ?? 'public',
+                      value:
+                          _privacySettings['location_visibility'] ?? 'public',
                       options: const {
                         'public': 'Public',
                         'friends': 'Amis seulement',
                         'private': 'Privé',
                       },
-                      onChanged: (value) => _updatePrivacySetting('location_visibility', value),
+                      onChanged: (value) =>
+                          _updatePrivacySetting('location_visibility', value),
                       icon: Icons.location_on,
                       isDark: isDark,
                     ),
@@ -201,7 +204,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                       title: 'Statut en ligne',
                       subtitle: 'Afficher quand vous êtes en ligne',
                       value: _privacySettings['show_online_status'] ?? true,
-                      onChanged: (value) => _updatePrivacySetting('show_online_status', value),
+                      onChanged: (value) =>
+                          _updatePrivacySetting('show_online_status', value),
                       icon: Icons.circle,
                       isDark: isDark,
                     ),
@@ -209,13 +213,15 @@ class _PrivacyPageState extends State<PrivacyPage> {
                     _buildDropdownTile(
                       title: 'Activité',
                       subtitle: 'Qui peut voir votre activité',
-                      value: _privacySettings['activity_visibility'] ?? 'public',
+                      value:
+                          _privacySettings['activity_visibility'] ?? 'public',
                       options: const {
                         'public': 'Tout le monde',
                         'friends': 'Amis seulement',
                         'private': 'Privé',
                       },
-                      onChanged: (value) => _updatePrivacySetting('activity_visibility', value),
+                      onChanged: (value) =>
+                          _updatePrivacySetting('activity_visibility', value),
                       icon: Icons.timeline,
                       isDark: isDark,
                     ),
@@ -230,7 +236,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                       title: 'Demandes d\'amis',
                       subtitle: 'Autoriser les demandes d\'amis',
                       value: _privacySettings['allow_friend_requests'] ?? true,
-                      onChanged: (value) => _updatePrivacySetting('allow_friend_requests', value),
+                      onChanged: (value) =>
+                          _updatePrivacySetting('allow_friend_requests', value),
                       icon: Icons.person_add,
                       isDark: isDark,
                     ),
@@ -239,7 +246,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                       title: 'Messages',
                       subtitle: 'Autoriser les messages privés',
                       value: _privacySettings['allow_messages'] ?? true,
-                      onChanged: (value) => _updatePrivacySetting('allow_messages', value),
+                      onChanged: (value) =>
+                          _updatePrivacySetting('allow_messages', value),
                       icon: Icons.message,
                       isDark: isDark,
                     ),
@@ -253,8 +261,10 @@ class _PrivacyPageState extends State<PrivacyPage> {
                     _buildSwitchTile(
                       title: 'Notifications email',
                       subtitle: 'Recevoir des notifications par email',
-                      value: _notificationSettings['email_notifications'] ?? true,
-                      onChanged: (value) => _updateNotificationSetting('email_notifications', value),
+                      value:
+                          _notificationSettings['email_notifications'] ?? true,
+                      onChanged: (value) => _updateNotificationSetting(
+                          'email_notifications', value),
                       icon: Icons.email_outlined,
                       isDark: isDark,
                     ),
@@ -262,8 +272,10 @@ class _PrivacyPageState extends State<PrivacyPage> {
                     _buildSwitchTile(
                       title: 'Notifications push',
                       subtitle: 'Recevoir des notifications sur l\'appareil',
-                      value: _notificationSettings['push_notifications'] ?? true,
-                      onChanged: (value) => _updateNotificationSetting('push_notifications', value),
+                      value:
+                          _notificationSettings['push_notifications'] ?? true,
+                      onChanged: (value) => _updateNotificationSetting(
+                          'push_notifications', value),
                       icon: Icons.notifications,
                       isDark: isDark,
                     ),
@@ -272,7 +284,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                       title: 'Nouvelles recettes',
                       subtitle: 'Être notifié des nouvelles recettes',
                       value: _notificationSettings['recipe_updates'] ?? true,
-                      onChanged: (value) => _updateNotificationSetting('recipe_updates', value),
+                      onChanged: (value) =>
+                          _updateNotificationSetting('recipe_updates', value),
                       icon: Icons.restaurant_menu,
                       isDark: isDark,
                     ),
@@ -281,7 +294,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                       title: 'Nouveaux produits',
                       subtitle: 'Être notifié des nouveaux produits',
                       value: _notificationSettings['product_updates'] ?? true,
-                      onChanged: (value) => _updateNotificationSetting('product_updates', value),
+                      onChanged: (value) =>
+                          _updateNotificationSetting('product_updates', value),
                       icon: Icons.shopping_bag,
                       isDark: isDark,
                     ),
@@ -290,7 +304,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                       title: 'Emails marketing',
                       subtitle: 'Recevoir des offres promotionnelles',
                       value: _notificationSettings['marketing_emails'] ?? false,
-                      onChanged: (value) => _updateNotificationSetting('marketing_emails', value),
+                      onChanged: (value) =>
+                          _updateNotificationSetting('marketing_emails', value),
                       icon: Icons.local_offer,
                       isDark: isDark,
                     ),
@@ -299,7 +314,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                       title: 'Résumé hebdomadaire',
                       subtitle: 'Recevoir un résumé de votre activité',
                       value: _notificationSettings['weekly_digest'] ?? true,
-                      onChanged: (value) => _updateNotificationSetting('weekly_digest', value),
+                      onChanged: (value) =>
+                          _updateNotificationSetting('weekly_digest', value),
                       icon: Icons.summarize,
                       isDark: isDark,
                     ),
@@ -316,7 +332,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
                       icon: Icons.download,
                       onTap: () {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Fonctionnalité à venir')),
+                          const SnackBar(
+                              content: Text('Fonctionnalité à venir')),
                         );
                       },
                       isDark: isDark,
@@ -535,7 +552,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
 
   void _showDeleteAccountDialog() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

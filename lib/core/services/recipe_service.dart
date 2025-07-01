@@ -1,17 +1,23 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'supabase_service.dart';
 
 class RecipeService {
-  static final _supabase = Supabase.instance.client;
+  // Helper to get client safely
+  static SupabaseClient? get _client =>
+      SupabaseService.isInitialized ? SupabaseService.client : null;
 
   // Récupérer une recette par ID avec ses produits
   static Future<Map<String, dynamic>?> getRecipeById(String recipeId) async {
+    if (!SupabaseService.isInitialized) {
+      print('❌ Supabase non initialisé, impossible de récupérer la recette.');
+      return null;
+    }
     try {
-      final response = await _supabase
+      final response = await _client!
           .from('recipes')
           .select('*')
           .eq('id', recipeId)
-          .single();
-
+          .maybeSingle();
       if (response != null) {
         return await _formatRecipeData(response);
       }
@@ -32,8 +38,12 @@ class RecipeService {
     int limit = 20,
     int offset = 0,
   }) async {
+    if (!SupabaseService.isInitialized) {
+      print('❌ Supabase non initialisé, impossible de récupérer les recettes.');
+      return [];
+    }
     try {
-      var query = _supabase.from('recipes').select('*');
+      var query = _client!.from('recipes').select('*');
 
       // Appliquer les filtres
       if (searchQuery != null && searchQuery.isNotEmpty) {
@@ -80,14 +90,18 @@ class RecipeService {
   // Récupérer les recettes populaires
   static Future<List<Map<String, dynamic>>> getPopularRecipes(
       {int limit = 10}) async {
+    if (!SupabaseService.isInitialized) {
+      print(
+          '❌ Supabase non initialisé, impossible de récupérer les recettes populaires.');
+      return [];
+    }
     try {
-      final response = await _supabase
+      final response = await _client!
           .from('recipes')
           .select('*')
           .order('rating', ascending: false)
           .order('view_count', ascending: false)
           .limit(limit);
-
       if (response.isNotEmpty) {
         List<Map<String, dynamic>> recipes = [];
         for (var recipe in response) {
@@ -106,13 +120,17 @@ class RecipeService {
   // Récupérer les recettes récentes
   static Future<List<Map<String, dynamic>>> getRecentRecipes(
       {int limit = 10}) async {
+    if (!SupabaseService.isInitialized) {
+      print(
+          '❌ Supabase non initialisé, impossible de récupérer les recettes récentes.');
+      return [];
+    }
     try {
-      final response = await _supabase
+      final response = await _client!
           .from('recipes')
           .select('*')
           .order('created_at', ascending: false)
           .limit(limit);
-
       if (response.isNotEmpty) {
         List<Map<String, dynamic>> recipes = [];
         for (var recipe in response) {
@@ -130,21 +148,24 @@ class RecipeService {
 
   // Incrémenter le compteur de vues
   static Future<void> incrementViewCount(String recipeId) async {
+    if (!SupabaseService.isInitialized) {
+      print('❌ Supabase non initialisé, impossible d\'incrémenter les vues.');
+      return;
+    }
     try {
-      await _supabase
+      await _client!
           .rpc('increment_recipe_views', params: {'recipe_uuid': recipeId});
     } catch (e) {
       print('⚠️ Erreur lors de l\'incrémentation des vues: $e');
       // Fallback: mise à jour manuelle
       try {
-        final recipe = await _supabase
+        final recipe = await _client!
             .from('recipes')
             .select('view_count')
             .eq('id', recipeId)
-            .single();
-
-        final currentViews = recipe['view_count'] ?? 0;
-        await _supabase
+            .maybeSingle();
+        final currentViews = recipe?['view_count'] ?? 0;
+        await _client!
             .from('recipes')
             .update({'view_count': currentViews + 1}).eq('id', recipeId);
       } catch (fallbackError) {
@@ -155,11 +176,14 @@ class RecipeService {
 
   // Ajouter aux favoris (nécessite authentification)
   static Future<bool> addToFavorites(String recipeId) async {
+    if (!SupabaseService.isInitialized) {
+      print('❌ Supabase non initialisé, impossible d\'ajouter aux favoris.');
+      return false;
+    }
     try {
-      final user = _supabase.auth.currentUser;
+      final user = _client!.auth.currentUser;
       if (user == null) return false;
-
-      await _supabase.from('favorites').insert({
+      await _client!.from('favorites').insert({
         'user_id': user.id,
         'recipe_id': recipeId,
         'created_at': DateTime.now().toIso8601String(),
@@ -173,11 +197,14 @@ class RecipeService {
 
   // Retirer des favoris
   static Future<bool> removeFromFavorites(String recipeId) async {
+    if (!SupabaseService.isInitialized) {
+      print('❌ Supabase non initialisé, impossible de retirer des favoris.');
+      return false;
+    }
     try {
-      final user = _supabase.auth.currentUser;
+      final user = _client!.auth.currentUser;
       if (user == null) return false;
-
-      await _supabase
+      await _client!
           .from('favorites')
           .delete()
           .eq('user_id', user.id)
@@ -191,17 +218,19 @@ class RecipeService {
 
   // Vérifier si une recette est en favoris
   static Future<bool> isFavorite(String recipeId) async {
+    if (!SupabaseService.isInitialized) {
+      print('❌ Supabase non initialisé, impossible de vérifier les favoris.');
+      return false;
+    }
     try {
-      final user = _supabase.auth.currentUser;
+      final user = _client!.auth.currentUser;
       if (user == null) return false;
-
-      final response = await _supabase
+      final response = await _client!
           .from('favorites')
           .select('id')
           .eq('user_id', user.id)
           .eq('recipe_id', recipeId)
           .maybeSingle();
-
       return response != null;
     } catch (e) {
       print('❌ Erreur lors de la vérification des favoris: $e');
@@ -211,15 +240,17 @@ class RecipeService {
 
   // Récupérer les favoris de l'utilisateur
   static Future<List<Map<String, dynamic>>> getUserFavorites() async {
+    if (!SupabaseService.isInitialized) {
+      print('❌ Supabase non initialisé, impossible de récupérer les favoris.');
+      return [];
+    }
     try {
-      final user = _supabase.auth.currentUser;
+      final user = _client!.auth.currentUser;
       if (user == null) return [];
-
-      final response = await _supabase
+      final response = await _client!
           .from('favorites')
           .select('recipe_id')
           .eq('user_id', user.id);
-
       if (response.isNotEmpty) {
         List<Map<String, dynamic>> recipes = [];
         for (var favorite in response) {
@@ -239,19 +270,22 @@ class RecipeService {
 
   // Ajouter à l'historique
   static Future<void> addToHistory(String recipeId) async {
+    if (!SupabaseService.isInitialized) {
+      print(
+          '❌ Supabase non initialisé, impossible d\'ajouter à l\'historique.');
+      return;
+    }
     try {
-      final user = _supabase.auth.currentUser;
+      final user = _client!.auth.currentUser;
       if (user == null) return;
-
       // Supprimer l'entrée existante s'il y en a une
-      await _supabase
+      await _client!
           .from('user_history')
           .delete()
           .eq('user_id', user.id)
           .eq('recipe_id', recipeId);
-
       // Ajouter la nouvelle entrée
-      await _supabase.from('user_history').insert({
+      await _client!.from('user_history').insert({
         'user_id': user.id,
         'recipe_id': recipeId,
         'viewed_at': DateTime.now().toIso8601String(),
@@ -264,17 +298,20 @@ class RecipeService {
   // Récupérer l'historique de l'utilisateur
   static Future<List<Map<String, dynamic>>> getUserHistory(
       {int limit = 20}) async {
+    if (!SupabaseService.isInitialized) {
+      print(
+          '❌ Supabase non initialisé, impossible de récupérer l\'historique.');
+      return [];
+    }
     try {
-      final user = _supabase.auth.currentUser;
+      final user = _client!.auth.currentUser;
       if (user == null) return [];
-
-      final response = await _supabase
+      final response = await _client!
           .from('user_history')
           .select('recipe_id')
           .eq('user_id', user.id)
           .order('viewed_at', ascending: false)
           .limit(limit);
-
       if (response.isNotEmpty) {
         List<Map<String, dynamic>> recipes = [];
         for (var history in response) {
@@ -324,7 +361,7 @@ class RecipeService {
             ingredient.containsKey('productId')) {
           try {
             // Récupérer les informations du produit
-            final productResponse = await _supabase
+            final productResponse = await _client!
                 .from('products')
                 .select('*')
                 .eq('id', ingredient['productId'])
@@ -446,7 +483,7 @@ class RecipeService {
   // Récupérer les catégories disponibles
   static Future<List<String>> getCategories() async {
     try {
-      final response = await _supabase
+      final response = await _client!
           .from('recipes')
           .select('category')
           .not('category', 'is', null);
@@ -471,14 +508,14 @@ class RecipeService {
   // Créer un panier à partir d'une recette
   static Future<bool> createCartFromRecipe(String recipeId) async {
     try {
-      final user = _supabase.auth.currentUser;
+      final user = _client!.auth.currentUser;
       if (user == null) return false;
 
       final recipe = await getRecipeById(recipeId);
       if (recipe == null) return false;
 
       // Créer un nouveau panier recette
-      final cartResponse = await _supabase
+      final cartResponse = await _client!
           .from('recipe_carts')
           .insert({
             'user_id': user.id,
@@ -494,7 +531,7 @@ class RecipeService {
       // Ajouter les ingrédients au panier
       final ingredients = recipe['ingredients'] as List<Map<String, dynamic>>;
       for (final ingredient in ingredients) {
-        await _supabase.from('cart_items').insert({
+        await _client!.from('cart_items').insert({
           'cart_id': cartId,
           'product_id': ingredient['product_id'],
           'quantity': ingredient['quantity'].round(),

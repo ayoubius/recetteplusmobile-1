@@ -54,8 +54,8 @@ class _SignUpPageState extends State<SignUpPage> {
         password: _passwordController.text.trim(),
         data: {
           'display_name': _fullNameController.text.trim(),
-          'phone_number': _phoneController.text.trim().isNotEmpty 
-              ? _phoneController.text.trim() 
+          'phone_number': _phoneController.text.trim().isNotEmpty
+              ? _phoneController.text.trim()
               : null,
         },
       );
@@ -63,11 +63,14 @@ class _SignUpPageState extends State<SignUpPage> {
       if (response.user != null) {
         // Créer le profil utilisateur dans la base de données
         await SupabaseService.createUserProfile(
-          uid: response.user!.id,
-          displayName: _fullNameController.text.trim(),
+          userId: response.user!.id,
           email: _emailController.text.trim(),
-          phoneNumber: _phoneController.text.trim().isNotEmpty 
-              ? _phoneController.text.trim() 
+          firstName: _fullNameController.text.trim().split(' ').first,
+          lastName: _fullNameController.text.trim().split(' ').length > 1
+              ? _fullNameController.text.trim().split(' ').skip(1).join(' ')
+              : null,
+          phone: _phoneController.text.trim().isNotEmpty
+              ? _phoneController.text.trim()
               : null,
         );
 
@@ -78,9 +81,10 @@ class _SignUpPageState extends State<SignUpPage> {
               backgroundColor: AppColors.success,
             ),
           );
-          
+
           // Navigation vers la page principale
-          Navigator.of(context).pushNamedAndRemoveUntil('/main', (route) => false);
+          Navigator.of(context)
+              .pushNamedAndRemoveUntil('/main', (route) => false);
         }
       }
     } on AuthException catch (e) {
@@ -108,8 +112,9 @@ class _SignUpPageState extends State<SignUpPage> {
 
     try {
       // Utiliser le service d'authentification Google natif
-      final AuthResponse? response = await GoogleAuthService.signInWithGoogleNative();
-      
+      final AuthResponse? response =
+          await GoogleAuthService.signInWithGoogleNative();
+
       if (response?.user != null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -118,9 +123,10 @@ class _SignUpPageState extends State<SignUpPage> {
               backgroundColor: AppColors.success,
             ),
           );
-          
+
           // Navigation vers la page principale
-          Navigator.of(context).pushNamedAndRemoveUntil('/main', (route) => false);
+          Navigator.of(context)
+              .pushNamedAndRemoveUntil('/main', (route) => false);
         }
       } else {
         // L'utilisateur a annulé la connexion

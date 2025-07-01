@@ -80,9 +80,9 @@ class _AuthPageState extends State<AuthPage> {
       if (response.user != null) {
         // Créer le profil utilisateur
         await SupabaseService.createUserProfile(
-          uid: response.user!.id,
-          displayName: _nameController.text.trim(),
+          userId: response.user!.id,
           email: _emailController.text.trim(),
+          firstName: _nameController.text.trim(),
         );
 
         if (mounted) {
@@ -151,10 +151,10 @@ class _AuthPageState extends State<AuthPage> {
 
         if (existingProfile == null) {
           await SupabaseService.createUserProfile(
-            uid: response.user!.id,
-            displayName:
-                response.user!.userMetadata?['full_name'] ?? 'Utilisateur',
+            userId: response.user!.id,
             email: response.user!.email ?? '',
+            firstName:
+                response.user!.userMetadata?['full_name'] ?? 'Utilisateur',
           );
         }
 

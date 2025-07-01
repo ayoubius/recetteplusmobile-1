@@ -51,14 +51,16 @@ class _SignInPageState extends State<SignInPage> {
 
       if (response.user != null) {
         // Vérifier si le profil existe, sinon le créer
-        final existingProfile = await SupabaseService.getUserProfile(response.user!.id);
-        
+        final existingProfile =
+            await SupabaseService.getUserProfile(response.user!.id);
+
         if (existingProfile == null) {
           await SupabaseService.createUserProfile(
-            uid: response.user!.id,
-            displayName: response.user!.userMetadata?['display_name'] ?? 
-                         response.user!.email?.split('@')[0] ?? 'Utilisateur',
+            userId: response.user!.id,
             email: response.user!.email ?? '',
+            firstName: response.user!.userMetadata?['display_name'] ??
+                response.user!.email?.split('@')[0] ??
+                'Utilisateur',
           );
         }
 
@@ -69,9 +71,10 @@ class _SignInPageState extends State<SignInPage> {
               backgroundColor: AppColors.success,
             ),
           );
-          
+
           // Navigation vers la page principale
-          Navigator.of(context).pushNamedAndRemoveUntil('/main', (route) => false);
+          Navigator.of(context)
+              .pushNamedAndRemoveUntil('/main', (route) => false);
         }
       }
     } on AuthException catch (e) {
@@ -99,8 +102,9 @@ class _SignInPageState extends State<SignInPage> {
 
     try {
       // Utiliser le service d'authentification Google natif
-      final AuthResponse? response = await GoogleAuthService.signInWithGoogleNative();
-      
+      final AuthResponse? response =
+          await GoogleAuthService.signInWithGoogleNative();
+
       if (response?.user != null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -109,9 +113,10 @@ class _SignInPageState extends State<SignInPage> {
               backgroundColor: AppColors.success,
             ),
           );
-          
+
           // Navigation vers la page principale
-          Navigator.of(context).pushNamedAndRemoveUntil('/main', (route) => false);
+          Navigator.of(context)
+              .pushNamedAndRemoveUntil('/main', (route) => false);
         }
       } else {
         // L'utilisateur a annulé la connexion

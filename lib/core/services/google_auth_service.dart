@@ -109,12 +109,12 @@ class GoogleAuthService {
       if (existingProfile == null) {
         // Créer un nouveau profil
         await SupabaseService.createUserProfile(
-          uid: supabaseUser.id,
-          displayName: googleUser.displayName ??
+          userId: supabaseUser.id,
+          email: googleUser.email,
+          firstName: googleUser.displayName ??
               googleUser.email.split('@')[0] ??
               'Utilisateur Google',
-          email: googleUser.email,
-          phoneNumber: null, // Google ne fournit pas le numéro de téléphone
+          phone: null, // Google ne fournit pas le numéro de téléphone
         );
 
         if (kDebugMode) {
@@ -128,8 +128,8 @@ class GoogleAuthService {
 
         if (needsUpdate) {
           await SupabaseService.updateUserProfile(
-            uid: supabaseUser.id,
-            displayName: googleUser.displayName,
+            userId: supabaseUser.id,
+            firstName: googleUser.displayName,
             additionalData: {
               'email': googleUser.email,
               'photo_url': googleUser.photoUrl,
