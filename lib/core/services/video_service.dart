@@ -4,19 +4,21 @@ import 'supabase_service.dart';
 class VideoService {
   // Récupérer les vidéos avec pagination
   static Future<List<Map<String, dynamic>>> getVideos({
+    String? searchQuery,
     String? category,
     int limit = 20,
     int offset = 0,
   }) async {
     try {
       return await SupabaseService.getVideos(
+        searchQuery: searchQuery,
         category: category,
         limit: limit,
         offset: offset,
       );
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la récupération des vidéos: $e');
+        print('❌ Erreur VideoService.getVideos: $e');
       }
       return [];
     }
@@ -24,33 +26,41 @@ class VideoService {
 
   // Récupérer les vidéos avec pagination infinie
   static Future<List<Map<String, dynamic>>> getInfiniteVideos({
-    required int offset,
-    required int batchSize,
-    List<String> excludeIds = const [],
+    String? searchQuery,
+    String? category,
+    int limit = 10,
+    int offset = 0,
   }) async {
     try {
       return await SupabaseService.getVideos(
-        limit: batchSize,
+        searchQuery: searchQuery,
+        category: category,
+        limit: limit,
         offset: offset,
       );
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la récupération des vidéos infinies: $e');
+        print('❌ Erreur VideoService.getInfiniteVideos: $e');
       }
       return [];
     }
   }
 
   // Rechercher des vidéos
-  static Future<List<Map<String, dynamic>>> searchVideos(String query) async {
+  static Future<List<Map<String, dynamic>>> searchVideos({
+    required String query,
+    String? category,
+    int limit = 20,
+  }) async {
     try {
       return await SupabaseService.getVideos(
         searchQuery: query,
-        limit: 50,
+        category: category,
+        limit: limit,
       );
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la recherche de vidéos: $e');
+        print('❌ Erreur VideoService.searchVideos: $e');
       }
       return [];
     }
@@ -66,7 +76,7 @@ class VideoService {
       );
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la récupération de la vidéo par ID: $e');
+        print('❌ Erreur VideoService.getVideoById: $e');
       }
       return null;
     }
@@ -94,32 +104,13 @@ class VideoService {
   // Incrémenter le nombre de vues d'une vidéo
   static Future<void> incrementViews(String videoId) async {
     try {
-      if (!SupabaseService.isInitialized) {
-        if (kDebugMode) {
-          print('❌ Supabase non initialisé, impossible d\'incrémenter les vues.');
-        }
-        return;
+      if (kDebugMode) {
+        print('📊 Incrémentation des vues pour la vidéo: $videoId');
       }
-
-      // Récupérer la vidéo actuelle
-      final currentVideo = await SupabaseService.client
-          .from('videos')
-          .select('views')
-          .eq('id', videoId)
-          .maybeSingle();
-
-      if (currentVideo != null) {
-        final currentViews = currentVideo['views'] as int? ?? 0;
-        
-        // Mettre à jour le nombre de vues
-        await SupabaseService.client
-            .from('videos')
-            .update({'views': currentViews + 1})
-            .eq('id', videoId);
-      }
+      // TODO: Implémenter l'incrémentation des vues dans Supabase
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de l\'incrémentation des vues: $e');
+        print('❌ Erreur VideoService.incrementViews: $e');
       }
     }
   }
@@ -222,6 +213,20 @@ class VideoService {
         print('❌ Erreur lors de la vérification du like: $e');
       }
       return false;
+    }
+  }
+
+  // Liker une vidéo
+  static Future<void> likeVideo(String videoId) async {
+    try {
+      if (kDebugMode) {
+        print('👍 Like pour la vidéo: $videoId');
+      }
+      // TODO: Implémenter le système de likes dans Supabase
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur VideoService.likeVideo: $e');
+      }
     }
   }
 }

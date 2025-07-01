@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:video_player/video_player.dart';
 
@@ -8,172 +7,163 @@ class VideoStateManager {
   VideoStateManager._internal();
 
   final Map<String, VideoPlayerController> _controllers = {};
-  final Map<String, bool> _isInitialized = {};
   final Map<String, bool> _isPlaying = {};
-  final Map<String, bool> _hasError = {};
+  final Map<String, bool> _isInitialized = {};
 
-  // Getters
-  Map<String, VideoPlayerController> get controllers => _controllers;
-  Map<String, bool> get isInitialized => _isInitialized;
-  Map<String, bool> get isPlaying => _isPlaying;
-  Map<String, bool> get hasError => _hasError;
+  VideoPlayerController? getController(String videoId) {
+    return _controllers[videoId];
+  }
 
-  // Créer ou récupérer un contrôleur pour une vidéo
-  VideoPlayerController? getController(String videoId, String videoUrl) {
-    if (_controllers.containsKey(videoId)) {
-      return _controllers[videoId];
-    }
+  bool isPlaying(String videoId) {
+    return _isPlaying[videoId] ?? false;
+  }
 
+  bool isInitialized(String videoId) {
+    return _isInitialized[videoId] ?? false;
+  }
+
+  Future<VideoPlayerController> initializeController(String videoId, String videoUrl) async {
     try {
+      if (_controllers.containsKey(videoId)) {
+        return _controllers[videoId]!;
+      }
+
       final controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
       _controllers[videoId] = controller;
-      _isInitialized[videoId] = false;
-      _isPlaying[videoId] = false;
-      _hasError[videoId] = false;
-
+      
+      await controller.initialize();
+      _isInitialized[videoId] = true;
+      
       // Écouter les changements d'état
       controller.addListener(() {
         _isPlaying[videoId] = controller.value.isPlaying;
-        _hasError[videoId] = controller.value.hasError;
-        
-        if (controller.value.hasError) {
-          if (kDebugMode) {
-            print('❌ Erreur vidéo pour $videoId: ${controller.value.errorDescription}');
-          }
-        }
       });
+
+      if (kDebugMode) {
+        print('✅ Contrôleur vidéo initialisé pour: $videoId');
+      }
 
       return controller;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la création du contrôleur pour $videoId: $e');
+        print('❌ Erreur lors de l\'initialisation du contrôleur vidéo: $e');
       }
-      _hasError[videoId] = true;
-      return null;
+      rethrow;
     }
   }
 
-  // Initialiser un contrôleur
-  Future<bool> initializeController(String videoId) async {
-    final controller = _controllers[videoId];
-    if (controller == null) return false;
-
+  Future<void> play(String videoId) async {
     try {
-      if (!controller.value.isInitialized) {
-        await controller.initialize();
-        _isInitialized[videoId] = true;
-        _hasError[videoId] = false;
+      final controller = _controllers[videoId];
+      if (controller != null && controller.value.isInitialized) {
+        await controller.play();
+        _isPlaying[videoId] = true;
         
         if (kDebugMode) {
-          print('✅ Contrôleur initialisé pour $videoId');
+          print('▶️ Lecture démarrée pour: $videoId');
         }
-        return true;
-      }
-      return true;
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur lors de l\'initialisation du contrôleur pour $videoId: $e');
-      }
-      _hasError[videoId] = true;
-      _isInitialized[videoId] = false;
-      return false;
-    }
-  }
-
-  // Jouer une vidéo
-  Future<void> play(String videoId) async {
-    final controller = _controllers[videoId];
-    if (controller == null || !controller.value.isInitialized) return;
-
-    try {
-      await controller.play();
-      _isPlaying[videoId] = true;
-      
-      if (kDebugMode) {
-        print('▶️ Lecture démarrée pour $videoId');
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la lecture pour $videoId: $e');
+        print('❌ Erreur lors de la lecture: $e');
       }
-      _hasError[videoId] = true;
     }
   }
 
-  // Mettre en pause une vidéo
   Future<void> pause(String videoId) async {
-    final controller = _controllers[videoId];
-    if (controller == null || !controller.value.isInitialized) return;
-
     try {
-      await controller.pause();
-      _isPlaying[videoId] = false;
-      
-      if (kDebugMode) {
-        print('⏸️ Lecture mise en pause pour $videoId');
+      final controller = _controllers[videoId];
+      if (controller != null && controller.value.isInitialized) {
+        await controller.pause();
+        _isPlaying[videoId] = false;
+        
+        if (kDebugMode) {
+          print('⏸️ Lecture mise en pause pour: $videoId');
+        }
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la mise en pause pour $videoId: $e');
+        print('❌ Erreur lors de la mise en pause: $e');
       }
     }
   }
 
-  // Arrêter toutes les vidéos sauf une
-  Future<void> pauseAllExcept(String? exceptVideoId) async {
-    for (final entry in _controllers.entries) {
-      if (entry.key != exceptVideoId && _isPlaying[entry.key] == true) {
-        await pause(entry.key);
-      }
-    }
-  }
-
-  // Disposer d'un contrôleur spécifique
-  Future<void> disposeController(String videoId) async {
+  Future<void> seekTo(String videoId, Duration position) async {
     try {
-      // Disposer du contrôleur
+      final controller = _controllers[videoId];
+      if (controller != null && controller.value.isInitialized) {
+        await controller.seekTo(position);
+        
+        if (kDebugMode) {
+          print('⏭️ Saut à la position ${position.inSeconds}s pour: $videoId');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors du saut: $e');
+      }
+    }
+  }
+
+  void pauseAll() {
+    for (final entry in _controllers.entries) {
+      if (entry.value.value.isPlaying) {
+        pause(entry.key);
+      }
+    }
+  }
+
+  void disposeController(String videoId) {
+    try {
       final controller = _controllers[videoId];
       if (controller != null) {
-        await controller.dispose();
+        controller.dispose();
         _controllers.remove(videoId);
-      }
-
-      // Nettoyer les états
-      _isInitialized.remove(videoId);
-      _isPlaying.remove(videoId);
-      _hasError.remove(videoId);
-
-      if (kDebugMode) {
-        print('🗑️ Contrôleur disposé pour $videoId');
+        _isPlaying.remove(videoId);
+        _isInitialized.remove(videoId);
+        
+        if (kDebugMode) {
+          print('🗑️ Contrôleur vidéo supprimé pour: $videoId');
+        }
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la disposition du contrôleur pour $videoId: $e');
+        print('❌ Erreur lors de la suppression du contrôleur: $e');
       }
     }
   }
 
-  // Disposer de tous les contrôleurs
-  Future<void> disposeAll() async {
+  void disposeAll() {
     try {
-      // Disposer de tous les contrôleurs
       for (final controller in _controllers.values) {
-        await controller.dispose();
+        controller.dispose();
       }
       _controllers.clear();
-
-      // Nettoyer tous les états
-      _isInitialized.clear();
       _isPlaying.clear();
-      _hasError.clear();
-
+      _isInitialized.clear();
+      
       if (kDebugMode) {
-        print('🗑️ Tous les contrôleurs ont été disposés');
+        print('🗑️ Tous les contrôleurs vidéo supprimés');
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la disposition de tous les contrôleurs: $e');
+        print('❌ Erreur lors de la suppression de tous les contrôleurs: $e');
       }
     }
+  }
+
+  Duration getPosition(String videoId) {
+    final controller = _controllers[videoId];
+    return controller?.value.position ?? Duration.zero;
+  }
+
+  Duration getDuration(String videoId) {
+    final controller = _controllers[videoId];
+    return controller?.value.duration ?? Duration.zero;
+  }
+
+  double getAspectRatio(String videoId) {
+    final controller = _controllers[videoId];
+    return controller?.value.aspectRatio ?? 16 / 9;
   }
 }

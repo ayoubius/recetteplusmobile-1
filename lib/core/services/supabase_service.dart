@@ -4,9 +4,18 @@ import 'package:flutter/foundation.dart';
 class SupabaseService {
   static SupabaseClient get client => Supabase.instance.client;
   
-  static bool get isInitialized => Supabase.instance.client.supabaseUrl.isNotEmpty;
+  static bool get isInitialized {
+    try {
+      // Vérifier si Supabase est initialisé en tentant d'accéder au client
+      final _ = Supabase.instance.client;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
 
-  // Récupérer les recettes avec données de test en fallback
+  // ==================== MÉTHODES POUR LES RECETTES ====================
+  
   static Future<List<Map<String, dynamic>>> getRecipes({
     String? searchQuery,
     String? category,
@@ -47,12 +56,14 @@ class SupabaseService {
     return _getTestRecipes(searchQuery: searchQuery, category: category, limit: limit, offset: offset);
   }
 
-  // Récupérer les produits avec données de test en fallback
+  // ==================== MÉTHODES POUR LES PRODUITS ====================
+  
   static Future<List<Map<String, dynamic>>> getProducts({
     String? searchQuery,
     String? category,
     int limit = 20,
     int offset = 0,
+    bool shuffle = false,
   }) async {
     try {
       if (isInitialized) {
@@ -71,7 +82,11 @@ class SupabaseService {
             .range(offset, offset + limit - 1);
         
         if (response.isNotEmpty) {
-          return response;
+          List<Map<String, dynamic>> products = List<Map<String, dynamic>>.from(response);
+          if (shuffle) {
+            products.shuffle();
+          }
+          return products;
         }
       }
     } catch (e) {
@@ -85,10 +100,11 @@ class SupabaseService {
       print('📱 Utilisation des données de test pour les produits');
     }
     
-    return _getTestProducts(searchQuery: searchQuery, category: category, limit: limit, offset: offset);
+    return _getTestProducts(searchQuery: searchQuery, category: category, limit: limit, offset: offset, shuffle: shuffle);
   }
 
-  // Récupérer les vidéos avec données de test en fallback
+  // ==================== MÉTHODES POUR LES VIDÉOS ====================
+  
   static Future<List<Map<String, dynamic>>> getVideos({
     String? searchQuery,
     String? category,
@@ -129,21 +145,19 @@ class SupabaseService {
     return _getTestVideos(searchQuery: searchQuery, category: category, limit: limit, offset: offset);
   }
 
-  // Récupérer le profil utilisateur
-  static Future<Map<String, dynamic>?> getUserProfile() async {
+  // ==================== MÉTHODES POUR LES PROFILS UTILISATEUR ====================
+  
+  static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
       if (isInitialized) {
-        final user = client.auth.currentUser;
-        if (user != null) {
-          final response = await client
-              .from('profiles')
-              .select('*')
-              .eq('id', user.id)
-              .maybeSingle();
-          
-          if (response != null) {
-            return response;
-          }
+        final response = await client
+            .from('user_profiles')
+            .select('*')
+            .eq('user_id', userId)
+            .maybeSingle();
+        
+        if (response != null) {
+          return response;
         }
       }
     } catch (e) {
@@ -153,16 +167,291 @@ class SupabaseService {
     }
 
     // Profil de test en fallback
+    if (kDebugMode) {
+      print('📱 Utilisation du profil de test');
+    }
+    
     return {
-      'id': 'test-user-id',
+      'user_id': userId,
       'email': 'test@example.com',
-      'full_name': 'Utilisateur Test',
-      'avatar_url': 'https://via.placeholder.com/150/4ECDC4/FFFFFF?text=UT',
+      'display_name': 'Utilisateur Test',
+      'first_name': 'Utilisateur',
+      'last_name': 'Test',
+      'phone_number': '+223 XX XX XX XX',
+      'photo_url': null,
+      'bio': 'Passionné de cuisine',
+      'location': 'Bamako, Mali',
       'created_at': DateTime.now().toIso8601String(),
+      'updated_at': DateTime.now().toIso8601String(),
     };
   }
 
-  // Données de test pour les recettes
+  static Future<void> createUserProfile({
+    required String userId,
+    required String email,
+    String? firstName,
+    String? lastName,
+    String? phone,
+  }) async {
+    try {
+      if (isInitialized) {
+        await client.from('user_profiles').insert({
+          'user_id': userId,
+          'email': email,
+          'first_name': firstName,
+          'last_name': lastName,
+          'display_name': firstName ?? email.split('@')[0],
+          'phone_number': phone,
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+        
+        if (kDebugMode) {
+          print('✅ Profil utilisateur créé avec succès');
+        }
+      } else {
+        if (kDebugMode) {
+          print('📱 Simulation: Profil utilisateur créé (mode test)');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la création du profil: $e');
+      }
+      // Ne pas faire échouer l'authentification pour un problème de profil
+    }
+  }
+
+  static Future<void> updateUserProfile({
+    required String userId,
+    String? firstName,
+    String? lastName,
+    String? phone,
+    Map<String, dynamic>? additionalData,
+  }) async {
+    try {
+      if (isInitialized) {
+        Map<String, dynamic> updateData = {
+          'updated_at': DateTime.now().toIso8601String(),
+        };
+
+        if (firstName != null) {
+          updateData['first_name'] = firstName;
+          updateData['display_name'] = firstName;
+        }
+        if (lastName != null) updateData['last_name'] = lastName;
+        if (phone != null) updateData['phone_number'] = phone;
+        if (additionalData != null) updateData.addAll(additionalData);
+
+        await client
+            .from('user_profiles')
+            .update(updateData)
+            .eq('user_id', userId);
+        
+        if (kDebugMode) {
+          print('✅ Profil utilisateur mis à jour avec succès');
+        }
+      } else {
+        if (kDebugMode) {
+          print('📱 Simulation: Profil utilisateur mis à jour (mode test)');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la mise à jour du profil: $e');
+      }
+      rethrow;
+    }
+  }
+
+  // ==================== MÉTHODES POUR LES FAVORIS ====================
+  
+  static Future<List<Map<String, dynamic>>> getUserFavorites() async {
+    try {
+      if (isInitialized) {
+        final user = client.auth.currentUser;
+        if (user == null) return [];
+
+        final response = await client
+            .from('favorites')
+            .select('item_id, type, created_at')
+            .eq('user_id', user.id)
+            .order('created_at', ascending: false);
+
+        return response;
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération des favoris: $e');
+      }
+    }
+
+    // Favoris de test en fallback
+    if (kDebugMode) {
+      print('📱 Utilisation des favoris de test');
+    }
+    
+    return [
+      {
+        'item_id': '1',
+        'type': 'recipe',
+        'created_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+      },
+      {
+        'item_id': '2',
+        'type': 'recipe',
+        'created_at': DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
+      },
+    ];
+  }
+
+  static Future<void> addToFavorites(String itemId, String type) async {
+    try {
+      if (isInitialized) {
+        final user = client.auth.currentUser;
+        if (user == null) return;
+
+        await client.from('favorites').insert({
+          'user_id': user.id,
+          'item_id': itemId,
+          'type': type,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+        
+        if (kDebugMode) {
+          print('✅ Ajouté aux favoris: $itemId');
+        }
+      } else {
+        if (kDebugMode) {
+          print('📱 Simulation: Ajouté aux favoris (mode test)');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de l\'ajout aux favoris: $e');
+      }
+      rethrow;
+    }
+  }
+
+  static Future<void> removeFromFavorites(String itemId) async {
+    try {
+      if (isInitialized) {
+        final user = client.auth.currentUser;
+        if (user == null) return;
+
+        await client
+            .from('favorites')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('item_id', itemId);
+        
+        if (kDebugMode) {
+          print('✅ Supprimé des favoris: $itemId');
+        }
+      } else {
+        if (kDebugMode) {
+          print('📱 Simulation: Supprimé des favoris (mode test)');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la suppression des favoris: $e');
+      }
+      rethrow;
+    }
+  }
+
+  // ==================== MÉTHODES POUR L'HISTORIQUE ====================
+  
+  static Future<List<Map<String, dynamic>>> getUserHistory({int limit = 20}) async {
+    try {
+      if (isInitialized) {
+        final user = client.auth.currentUser;
+        if (user == null) return [];
+
+        final response = await client
+            .from('user_history')
+            .select('*, recipes(*)')
+            .eq('user_id', user.id)
+            .order('viewed_at', ascending: false)
+            .limit(limit);
+
+        return response;
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération de l\'historique: $e');
+      }
+    }
+
+    // Historique de test en fallback
+    if (kDebugMode) {
+      print('📱 Utilisation de l\'historique de test');
+    }
+    
+    return [
+      {
+        'recipe_id': '1',
+        'viewed_at': DateTime.now().subtract(const Duration(hours: 2)).toIso8601String(),
+        'recipes': {
+          'id': '1',
+          'title': 'Pâtes Carbonara Authentiques',
+          'description': 'La vraie recette italienne des pâtes carbonara.',
+          'image_url': 'https://via.placeholder.com/400x300/FF6B6B/FFFFFF?text=Carbonara',
+        }
+      },
+      {
+        'recipe_id': '2',
+        'viewed_at': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+        'recipes': {
+          'id': '2',
+          'title': 'Tarte Tatin aux Pommes',
+          'description': 'Dessert français classique avec des pommes caramélisées.',
+          'image_url': 'https://via.placeholder.com/400x300/4ECDC4/FFFFFF?text=Tarte+Tatin',
+        }
+      },
+    ];
+  }
+
+  static Future<void> addToHistory(String itemId) async {
+    try {
+      if (isInitialized) {
+        final user = client.auth.currentUser;
+        if (user == null) return;
+
+        // Supprimer l'entrée existante s'il y en a une
+        await client
+            .from('user_history')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('recipe_id', itemId);
+
+        // Ajouter la nouvelle entrée
+        await client.from('user_history').insert({
+          'user_id': user.id,
+          'recipe_id': itemId,
+          'viewed_at': DateTime.now().toIso8601String(),
+        });
+        
+        if (kDebugMode) {
+          print('✅ Ajouté à l\'historique: $itemId');
+        }
+      } else {
+        if (kDebugMode) {
+          print('📱 Simulation: Ajouté à l\'historique (mode test)');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('⚠️ Erreur lors de l\'ajout à l\'historique: $e');
+      }
+      // Ne pas faire échouer l'opération principale pour un problème d'historique
+    }
+  }
+
+  // ==================== DONNÉES DE TEST ====================
+  
   static List<Map<String, dynamic>> _getTestRecipes({
     String? searchQuery,
     String? category,
@@ -174,81 +463,40 @@ class SupabaseService {
         'id': '1',
         'title': 'Pâtes Carbonara Authentiques',
         'description': 'La vraie recette italienne des pâtes carbonara avec œufs, pecorino et guanciale.',
-        'image_url': 'https://via.placeholder.com/400x300/FF6B6B/FFFFFF?text=Carbonara',
+        'image': 'https://via.placeholder.com/400x300/FF6B6B/FFFFFF?text=Carbonara',
         'prep_time': 15,
         'cook_time': 20,
         'servings': 4,
         'difficulty': 'Facile',
         'category': 'Plats principaux',
-        'ingredients': [
-          {'name': 'Spaghetti', 'quantity': '400g'},
-          {'name': 'Œufs', 'quantity': '4'},
-          {'name': 'Pecorino Romano', 'quantity': '100g'},
-          {'name': 'Guanciale', 'quantity': '150g'},
-          {'name': 'Poivre noir', 'quantity': 'Au goût'},
-        ],
-        'instructions': [
-          'Faire cuire les pâtes dans l\'eau salée',
-          'Faire revenir le guanciale',
-          'Mélanger œufs et fromage',
-          'Combiner le tout hors du feu',
-        ],
-        'created_at': '2024-01-15T10:00:00Z',
-        'likes': 245,
         'rating': 4.8,
+        'created_at': '2024-01-15T10:00:00Z',
       },
       {
         'id': '2',
         'title': 'Tarte Tatin aux Pommes',
         'description': 'Dessert français classique avec des pommes caramélisées et une pâte brisée.',
-        'image_url': 'https://via.placeholder.com/400x300/4ECDC4/FFFFFF?text=Tarte+Tatin',
+        'image': 'https://via.placeholder.com/400x300/4ECDC4/FFFFFF?text=Tarte+Tatin',
         'prep_time': 30,
         'cook_time': 45,
         'servings': 8,
         'difficulty': 'Moyen',
         'category': 'Desserts',
-        'ingredients': [
-          {'name': 'Pommes', 'quantity': '8'},
-          {'name': 'Sucre', 'quantity': '150g'},
-          {'name': 'Beurre', 'quantity': '50g'},
-          {'name': 'Pâte brisée', 'quantity': '1'},
-        ],
-        'instructions': [
-          'Préparer le caramel',
-          'Disposer les pommes',
-          'Recouvrir de pâte',
-          'Cuire au four',
-        ],
-        'created_at': '2024-01-14T14:30:00Z',
-        'likes': 189,
         'rating': 4.6,
+        'created_at': '2024-01-14T14:30:00Z',
       },
       {
         'id': '3',
         'title': 'Salade César Maison',
         'description': 'Salade fraîche avec sa sauce césar authentique et ses croûtons dorés.',
-        'image_url': 'https://via.placeholder.com/400x300/45B7D1/FFFFFF?text=Salade+César',
+        'image': 'https://via.placeholder.com/400x300/45B7D1/FFFFFF?text=Salade+César',
         'prep_time': 20,
         'cook_time': 10,
         'servings': 4,
         'difficulty': 'Facile',
         'category': 'Entrées',
-        'ingredients': [
-          {'name': 'Laitue romaine', 'quantity': '2 têtes'},
-          {'name': 'Parmesan', 'quantity': '100g'},
-          {'name': 'Pain', 'quantity': '4 tranches'},
-          {'name': 'Anchois', 'quantity': '6 filets'},
-          {'name': 'Œuf', 'quantity': '1'},
-        ],
-        'instructions': [
-          'Préparer la sauce',
-          'Faire les croûtons',
-          'Laver la salade',
-          'Assembler et servir',
-        ],
-        'created_at': '2024-01-13T16:45:00Z',
-        'likes': 156,
         'rating': 4.4,
+        'created_at': '2024-01-13T16:45:00Z',
       },
     ];
 
@@ -281,12 +529,12 @@ class SupabaseService {
     return filteredRecipes.sublist(startIndex, endIndex);
   }
 
-  // Données de test pour les produits
   static List<Map<String, dynamic>> _getTestProducts({
     String? searchQuery,
     String? category,
     int limit = 20,
     int offset = 0,
+    bool shuffle = false,
   }) {
     List<Map<String, dynamic>> testProducts = [
       {
@@ -299,7 +547,6 @@ class SupabaseService {
         'category': 'Huiles et Vinaigres',
         'in_stock': true,
         'stock_quantity': 25,
-        'rating': 4.7,
         'created_at': '2024-01-15T10:00:00Z',
       },
       {
@@ -312,7 +559,6 @@ class SupabaseService {
         'category': 'Fromages',
         'in_stock': true,
         'stock_quantity': 15,
-        'rating': 4.9,
         'created_at': '2024-01-14T14:30:00Z',
       },
       {
@@ -325,7 +571,6 @@ class SupabaseService {
         'category': 'Pâtes et Riz',
         'in_stock': true,
         'stock_quantity': 40,
-        'rating': 4.5,
         'created_at': '2024-01-13T16:45:00Z',
       },
       {
@@ -338,7 +583,6 @@ class SupabaseService {
         'category': 'Conserves',
         'in_stock': true,
         'stock_quantity': 30,
-        'rating': 4.6,
         'created_at': '2024-01-12T12:15:00Z',
       },
     ];
@@ -361,6 +605,11 @@ class SupabaseService {
       }).toList();
     }
 
+    // Mélanger si demandé
+    if (shuffle) {
+      filteredProducts.shuffle();
+    }
+
     // Appliquer la pagination
     final startIndex = offset;
     final endIndex = (startIndex + limit).clamp(0, filteredProducts.length);
@@ -372,7 +621,6 @@ class SupabaseService {
     return filteredProducts.sublist(startIndex, endIndex);
   }
 
-  // Données de test pour les vidéos
   static List<Map<String, dynamic>> _getTestVideos({
     String? searchQuery,
     String? category,
