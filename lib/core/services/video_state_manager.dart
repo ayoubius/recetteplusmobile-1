@@ -2,42 +2,24 @@ import 'package:flutter/foundation.dart';
 import 'package:video_player/video_player.dart';
 
 class VideoStateManager {
-  static final VideoStateManager _instance = VideoStateManager._internal();
-  factory VideoStateManager() => _instance;
-  VideoStateManager._internal();
-
   final Map<String, VideoPlayerController> _controllers = {};
-  final Map<String, bool> _isPlaying = {};
-  final Map<String, bool> _isInitialized = {};
+  final Map<String, bool> _initializedControllers = {};
 
-  VideoPlayerController? getController(String videoId) {
-    return _controllers[videoId];
-  }
-
-  bool isPlaying(String videoId) {
-    return _isPlaying[videoId] ?? false;
-  }
-
-  bool isInitialized(String videoId) {
-    return _isInitialized[videoId] ?? false;
-  }
-
+  // Initialiser un contrôleur vidéo
   Future<VideoPlayerController> initializeController(String videoId, String videoUrl) async {
     try {
-      if (_controllers.containsKey(videoId)) {
+      // Si le contrôleur existe déjà, le retourner
+      if (_controllers.containsKey(videoId) && _initializedControllers[videoId] == true) {
         return _controllers[videoId]!;
       }
 
+      // Créer un nouveau contrôleur
       final controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
       _controllers[videoId] = controller;
-      
+
+      // Initialiser le contrôleur
       await controller.initialize();
-      _isInitialized[videoId] = true;
-      
-      // Écouter les changements d'état
-      controller.addListener(() {
-        _isPlaying[videoId] = controller.value.isPlaying;
-      });
+      _initializedControllers[videoId] = true;
 
       if (kDebugMode) {
         print('✅ Contrôleur vidéo initialisé pour: $videoId');
@@ -48,19 +30,29 @@ class VideoStateManager {
       if (kDebugMode) {
         print('❌ Erreur lors de l\'initialisation du contrôleur vidéo: $e');
       }
+      _initializedControllers[videoId] = false;
       rethrow;
     }
   }
 
+  // Obtenir un contrôleur existant
+  VideoPlayerController? getController(String videoId) {
+    return _controllers[videoId];
+  }
+
+  // Vérifier si un contrôleur est initialisé
+  bool isControllerInitialized(String videoId) {
+    return _initializedControllers[videoId] == true;
+  }
+
+  // Jouer une vidéo
   Future<void> play(String videoId) async {
     try {
       final controller = _controllers[videoId];
-      if (controller != null && controller.value.isInitialized) {
+      if (controller != null && _initializedControllers[videoId] == true) {
         await controller.play();
-        _isPlaying[videoId] = true;
-        
         if (kDebugMode) {
-          print('▶️ Lecture démarrée pour: $videoId');
+          print('▶️ Lecture de la vidéo: $videoId');
         }
       }
     } catch (e) {
@@ -70,32 +62,49 @@ class VideoStateManager {
     }
   }
 
+  // Mettre en pause une vidéo
   Future<void> pause(String videoId) async {
     try {
       final controller = _controllers[videoId];
-      if (controller != null && controller.value.isInitialized) {
+      if (controller != null && _initializedControllers[videoId] == true) {
         await controller.pause();
-        _isPlaying[videoId] = false;
-        
         if (kDebugMode) {
-          print('⏸️ Lecture mise en pause pour: $videoId');
+          print('⏸️ Pause de la vidéo: $videoId');
         }
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la mise en pause: $e');
+        print('❌ Erreur lors de la pause: $e');
       }
     }
   }
 
+  // Mettre en pause toutes les vidéos sauf une
+  Future<void> pauseAllExcept(String activeVideoId) async {
+    try {
+      for (final entry in _controllers.entries) {
+        if (entry.key != activeVideoId && _initializedControllers[entry.key] == true) {
+          await entry.value.pause();
+        }
+      }
+      if (kDebugMode) {
+        print('⏸️ Pause de toutes les vidéos sauf: $activeVideoId');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la pause globale: $e');
+      }
+    }
+  }
+
+  // Aller à une position spécifique
   Future<void> seekTo(String videoId, Duration position) async {
     try {
       final controller = _controllers[videoId];
-      if (controller != null && controller.value.isInitialized) {
+      if (controller != null && _initializedControllers[videoId] == true) {
         await controller.seekTo(position);
-        
         if (kDebugMode) {
-          print('⏭️ Saut à la position ${position.inSeconds}s pour: $videoId');
+          print('⏭️ Saut à ${position.inSeconds}s pour la vidéo: $videoId');
         }
       }
     } catch (e) {
@@ -105,65 +114,80 @@ class VideoStateManager {
     }
   }
 
-  void pauseAll() {
-    for (final entry in _controllers.entries) {
-      if (entry.value.value.isPlaying) {
-        pause(entry.key);
-      }
-    }
-  }
-
-  void disposeController(String videoId) {
+  // Définir le volume
+  Future<void> setVolume(String videoId, double volume) async {
     try {
       final controller = _controllers[videoId];
-      if (controller != null) {
-        controller.dispose();
-        _controllers.remove(videoId);
-        _isPlaying.remove(videoId);
-        _isInitialized.remove(videoId);
-        
+      if (controller != null && _initializedControllers[videoId] == true) {
+        await controller.setVolume(volume.clamp(0.0, 1.0));
         if (kDebugMode) {
-          print('🗑️ Contrôleur vidéo supprimé pour: $videoId');
+          print('🔊 Volume défini à ${(volume * 100).toInt()}% pour la vidéo: $videoId');
         }
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la suppression du contrôleur: $e');
+        print('❌ Erreur lors du réglage du volume: $e');
       }
     }
   }
 
-  void disposeAll() {
+  // Nettoyer un contrôleur spécifique
+  Future<void> disposeController(String videoId) async {
     try {
-      for (final controller in _controllers.values) {
-        controller.dispose();
-      }
-      _controllers.clear();
-      _isPlaying.clear();
-      _isInitialized.clear();
-      
-      if (kDebugMode) {
-        print('🗑️ Tous les contrôleurs vidéo supprimés');
+      final controller = _controllers[videoId];
+      if (controller != null) {
+        await controller.dispose();
+        _controllers.remove(videoId);
+        _initializedControllers.remove(videoId);
+        if (kDebugMode) {
+          print('🗑️ Contrôleur vidéo nettoyé pour: $videoId');
+        }
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur lors de la suppression de tous les contrôleurs: $e');
+        print('❌ Erreur lors du nettoyage du contrôleur: $e');
       }
     }
   }
 
-  Duration getPosition(String videoId) {
-    final controller = _controllers[videoId];
-    return controller?.value.position ?? Duration.zero;
+  // Nettoyer tous les contrôleurs
+  Future<void> disposeAll() async {
+    try {
+      for (final controller in _controllers.values) {
+        await controller.dispose();
+      }
+      _controllers.clear();
+      _initializedControllers.clear();
+      if (kDebugMode) {
+        print('🗑️ Tous les contrôleurs vidéo ont été nettoyés');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors du nettoyage global: $e');
+      }
+    }
   }
 
-  Duration getDuration(String videoId) {
+  // Obtenir les informations d'une vidéo
+  Map<String, dynamic>? getVideoInfo(String videoId) {
     final controller = _controllers[videoId];
-    return controller?.value.duration ?? Duration.zero;
+    if (controller != null && _initializedControllers[videoId] == true) {
+      return {
+        'duration': controller.value.duration,
+        'position': controller.value.position,
+        'isPlaying': controller.value.isPlaying,
+        'isBuffering': controller.value.isBuffering,
+        'hasError': controller.value.hasError,
+        'aspectRatio': controller.value.aspectRatio,
+        'volume': controller.value.volume,
+      };
+    }
+    return null;
   }
 
-  double getAspectRatio(String videoId) {
-    final controller = _controllers[videoId];
-    return controller?.value.aspectRatio ?? 16 / 9;
-  }
+  // Obtenir le nombre de contrôleurs actifs
+  int get activeControllersCount => _controllers.length;
+
+  // Obtenir la liste des IDs de vidéos actives
+  List<String> get activeVideoIds => _controllers.keys.toList();
 }

@@ -26,16 +26,13 @@ class VideoService {
 
   // Récupérer les vidéos avec pagination infinie
   static Future<List<Map<String, dynamic>>> getInfiniteVideos({
-    String? searchQuery,
-    String? category,
-    int limit = 10,
     int offset = 0,
+    int batchSize = 10,
+    List<String> excludeIds = const [],
   }) async {
     try {
       return await SupabaseService.getVideos(
-        searchQuery: searchQuery,
-        category: category,
-        limit: limit,
+        limit: batchSize,
         offset: offset,
       );
     } catch (e) {
@@ -47,16 +44,11 @@ class VideoService {
   }
 
   // Rechercher des vidéos
-  static Future<List<Map<String, dynamic>>> searchVideos({
-    required String query,
-    String? category,
-    int limit = 20,
-  }) async {
+  static Future<List<Map<String, dynamic>>> searchVideos(String query) async {
     try {
       return await SupabaseService.getVideos(
         searchQuery: query,
-        category: category,
-        limit: limit,
+        limit: 50,
       );
     } catch (e) {
       if (kDebugMode) {
