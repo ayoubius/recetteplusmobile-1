@@ -44,6 +44,82 @@ class VideoService {
     );
   }
 
+  // Méthode pour récupérer des vidéos infinies (pagination)
+  static Future<List<Map<String, dynamic>>> getInfiniteVideos({
+    required int offset,
+    required int batchSize,
+    List<String> excludeIds = const [],
+  }) async {
+    try {
+      if (SupabaseService.isInitialized) {
+        var query = SupabaseService.client.from('videos').select('*');
+        
+        // Exclure les IDs déjà chargés
+        if (excludeIds.isNotEmpty) {
+          query = query.not('id', 'in', '(${excludeIds.join(',')})');
+        }
+        
+        final videos = await query
+            .order('created_at', ascending: false)
+            .range(offset, offset + batchSize - 1);
+        
+        if (videos.isNotEmpty) {
+          return videos;
+        }
+      }
+    } catch (e) {
+      print('❌ Erreur lors de la récupération des vidéos infinies: $e');
+    }
+
+    // Fallback vers les données de test
+    final testVideos = await _getTestVideos();
+    final filteredVideos = testVideos
+        .where((video) => !excludeIds.contains(video['id'].toString()))
+        .toList();
+    
+    final startIndex = offset;
+    final endIndex = (startIndex + batchSize).clamp(0, filteredVideos.length);
+    
+    if (startIndex >= filteredVideos.length) {
+      return [];
+    }
+    
+    return filteredVideos.sublist(startIndex, endIndex);
+  }
+
+  // Méthode pour rechercher des vidéos
+  static Future<List<Map<String, dynamic>>> searchVideos(String query) async {
+    try {
+      if (SupabaseService.isInitialized) {
+        final videos = await SupabaseService.client
+            .from('videos')
+            .select('*')
+            .or('title.ilike.%$query%,description.ilike.%$query%')
+            .order('created_at', ascending: false);
+        
+        if (videos.isNotEmpty) {
+          return videos;
+        }
+      }
+    } catch (e) {
+      print('❌ Erreur lors de la recherche de vidéos: $e');
+    }
+
+    // Fallback vers les données de test
+    final testVideos = await _getTestVideos();
+    final searchQuery = query.toLowerCase();
+    
+    return testVideos.where((video) {
+      final title = video['title']?.toString().toLowerCase() ?? '';
+      final description = video['description']?.toString().toLowerCase() ?? '';
+      final category = video['category']?.toString().toLowerCase() ?? '';
+      
+      return title.contains(searchQuery) ||
+          description.contains(searchQuery) ||
+          category.contains(searchQuery);
+    }).toList();
+  }
+
   // Données de test pour les vidéos
   static Future<List<Map<String, dynamic>>> _getTestVideos({
     String? searchQuery,
@@ -59,7 +135,7 @@ class VideoService {
         'title': 'Recette de Pâtes Carbonara',
         'description': 'Une délicieuse recette de pâtes carbonara authentique',
         'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        'thumbnail_url': 'https://via.placeholder.com/400x300/FF6B6B/FFFFFF?text=Carbonara',
+        'thumbnail': 'https://via.placeholder.com/400x300/FF6B6B/FFFFFF?text=Carbonara',
         'duration': 300,
         'category': 'Plats principaux',
         'likes': 1250,
@@ -72,7 +148,7 @@ class VideoService {
         'title': 'Tarte aux Pommes Maison',
         'description': 'Apprenez à faire une tarte aux pommes parfaite',
         'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-        'thumbnail_url': 'https://via.placeholder.com/400x300/4ECDC4/FFFFFF?text=Tarte+Pommes',
+        'thumbnail': 'https://via.placeholder.com/400x300/4ECDC4/FFFFFF?text=Tarte+Pommes',
         'duration': 420,
         'category': 'Desserts',
         'likes': 890,
@@ -85,7 +161,7 @@ class VideoService {
         'title': 'Salade César Fraîche',
         'description': 'Une salade césar croquante et savoureuse',
         'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-        'thumbnail_url': 'https://via.placeholder.com/400x300/45B7D1/FFFFFF?text=Salade+César',
+        'thumbnail': 'https://via.placeholder.com/400x300/45B7D1/FFFFFF?text=Salade+César',
         'duration': 180,
         'category': 'Entrées',
         'likes': 650,
@@ -98,7 +174,7 @@ class VideoService {
         'title': 'Soupe de Légumes d\'Hiver',
         'description': 'Une soupe réconfortante pour les jours froids',
         'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-        'thumbnail_url': 'https://via.placeholder.com/400x300/96CEB4/FFFFFF?text=Soupe+Légumes',
+        'thumbnail': 'https://via.placeholder.com/400x300/96CEB4/FFFFFF?text=Soupe+Légumes',
         'duration': 240,
         'category': 'Soupes',
         'likes': 420,
@@ -111,13 +187,78 @@ class VideoService {
         'title': 'Cookies aux Pépites de Chocolat',
         'description': 'Des cookies moelleux et délicieux',
         'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-        'thumbnail_url': 'https://via.placeholder.com/400x300/FECA57/FFFFFF?text=Cookies',
+        'thumbnail': 'https://via.placeholder.com/400x300/FECA57/FFFFFF?text=Cookies',
         'duration': 360,
         'category': 'Desserts',
         'likes': 1100,
         'views': 18000,
         'created_at': '2024-01-11T09:30:00Z',
         'recipe_id': '5',
+      },
+      {
+        'id': '6',
+        'title': 'Smoothie Vert Détox',
+        'description': 'Un smoothie vert rafraîchissant et plein de vitamines',
+        'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+        'thumbnail': 'https://via.placeholder.com/400x300/95E1D3/FFFFFF?text=Smoothie+Vert',
+        'duration': 120,
+        'category': 'Boissons',
+        'likes': 756,
+        'views': 9200,
+        'created_at': '2024-01-10T08:15:00Z',
+        'recipe_id': '6',
+      },
+      {
+        'id': '7',
+        'title': 'Pizza Margherita Authentique',
+        'description': 'La vraie pizza margherita italienne',
+        'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
+        'thumbnail': 'https://via.placeholder.com/400x300/FF9F43/FFFFFF?text=Pizza+Margherita',
+        'duration': 480,
+        'category': 'Plats principaux',
+        'likes': 1580,
+        'views': 22000,
+        'created_at': '2024-01-09T19:30:00Z',
+        'recipe_id': '7',
+      },
+      {
+        'id': '8',
+        'title': 'Crème Brûlée Parfaite',
+        'description': 'Le secret d\'une crème brûlée réussie',
+        'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+        'thumbnail': 'https://via.placeholder.com/400x300/F8B500/FFFFFF?text=Crème+Brûlée',
+        'duration': 390,
+        'category': 'Desserts',
+        'likes': 920,
+        'views': 13500,
+        'created_at': '2024-01-08T15:45:00Z',
+        'recipe_id': '8',
+      },
+      {
+        'id': '9',
+        'title': 'Ratatouille Provençale',
+        'description': 'Un plat traditionnel de Provence',
+        'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+        'thumbnail': 'https://via.placeholder.com/400x300/6C5CE7/FFFFFF?text=Ratatouille',
+        'duration': 350,
+        'category': 'Végétarien',
+        'likes': 680,
+        'views': 8900,
+        'created_at': '2024-01-07T12:20:00Z',
+        'recipe_id': '9',
+      },
+      {
+        'id': '10',
+        'title': 'Sushi Maison',
+        'description': 'Apprenez à faire des sushis comme un chef',
+        'video_url': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4',
+        'thumbnail': 'https://via.placeholder.com/400x300/00B894/FFFFFF?text=Sushi+Maison',
+        'duration': 600,
+        'category': 'Plats principaux',
+        'likes': 1340,
+        'views': 19800,
+        'created_at': '2024-01-06T17:10:00Z',
+        'recipe_id': '10',
       },
     ];
 
@@ -133,7 +274,7 @@ class VideoService {
       }).toList();
     }
 
-    if (category != null && category.isNotEmpty) {
+    if (category != null && category.isNotEmpty && category != 'Tous') {
       filteredVideos = filteredVideos.where((video) {
         return video['category']?.toString() == category;
       }).toList();
@@ -185,7 +326,7 @@ class VideoService {
     }
 
     // Fallback vers les catégories de test
-    return ['Plats principaux', 'Desserts', 'Entrées', 'Soupes', 'Boissons'];
+    return ['Plats principaux', 'Desserts', 'Entrées', 'Soupes', 'Boissons', 'Végétarien'];
   }
 
   // Obtenir une vidéo par ID
@@ -208,10 +349,13 @@ class VideoService {
 
     // Fallback vers les données de test
     final testVideos = await _getTestVideos();
-    return testVideos.firstWhere(
-      (video) => video['id'] == videoId,
-      orElse: () => {},
-    );
+    try {
+      return testVideos.firstWhere(
+        (video) => video['id'] == videoId,
+      );
+    } catch (e) {
+      return null;
+    }
   }
 
   // Incrémenter le nombre de vues

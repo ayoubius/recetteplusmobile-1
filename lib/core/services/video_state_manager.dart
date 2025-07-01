@@ -159,9 +159,9 @@ class VideoStateManager extends ChangeNotifier {
       await controller.initialize();
 
       // Configurer le contrôleur
-      controller.setLooping(true);
-      controller.setVolume(_globalVolume);
-      if (_isMuted) controller.setVolume(0.0);
+      await controller.setLooping(true);
+      await controller.setVolume(_globalVolume);
+      if (_isMuted) await controller.setVolume(0.0);
 
       // Ajouter le listener
       _listeners[videoId] = controller.addListener(() {
@@ -361,8 +361,11 @@ class VideoStateManager extends ChangeNotifier {
       _controllers.remove(videoId);
     }
 
-    _listeners[videoId]?.cancel();
-    _listeners.remove(videoId);
+    final listener = _listeners[videoId];
+    if (listener != null) {
+      await listener.cancel();
+      _listeners.remove(videoId);
+    }
 
     _videoInfo.remove(videoId);
 
