@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -7,7 +8,7 @@ class SecurityService {
       encryptedSharedPreferences: true,
     ),
     iOptions: IOSOptions(
-      accessibility: IOSAccessibility.first_unlock_this_device,
+      accessibility: KeychainAccessibility.first_unlock_this_device,
     ),
   );
 

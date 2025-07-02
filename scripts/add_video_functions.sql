@@ -7,7 +7,7 @@ BEGIN
       updated_at = NOW()
   WHERE id = video_id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Fonction pour décrémenter les likes d'une vidéo
 CREATE OR REPLACE FUNCTION decrement_video_likes(video_id UUID)
@@ -18,7 +18,7 @@ BEGIN
       updated_at = NOW()
   WHERE id = video_id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Fonction pour incrémenter les vues d'une vidéo
 CREATE OR REPLACE FUNCTION increment_video_views(video_id UUID)
@@ -29,9 +29,9 @@ BEGIN
       updated_at = NOW()
   WHERE id = video_id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Créer la table video_likes si elle n'existe pas
+-- Table pour les likes des vidéos
 CREATE TABLE IF NOT EXISTS video_likes (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   video_id UUID NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
@@ -43,9 +43,11 @@ CREATE TABLE IF NOT EXISTS video_likes (
 -- Index pour optimiser les requêtes
 CREATE INDEX IF NOT EXISTS idx_video_likes_video_id ON video_likes(video_id);
 CREATE INDEX IF NOT EXISTS idx_video_likes_user_id ON video_likes(user_id);
-CREATE INDEX IF NOT EXISTS idx_video_likes_created_at ON video_likes(created_at);
+CREATE INDEX IF NOT EXISTS idx_videos_likes ON videos(likes DESC);
+CREATE INDEX IF NOT EXISTS idx_videos_views ON videos(views DESC);
+CREATE INDEX IF NOT EXISTS idx_videos_category ON videos(category);
 
--- RLS pour video_likes
+-- RLS (Row Level Security) pour video_likes
 ALTER TABLE video_likes ENABLE ROW LEVEL SECURITY;
 
 -- Politique pour permettre aux utilisateurs de voir leurs propres likes
@@ -60,12 +62,14 @@ CREATE POLICY "Users can insert their own likes" ON video_likes
 CREATE POLICY "Users can delete their own likes" ON video_likes
   FOR DELETE USING (auth.uid() = user_id);
 
--- Ajouter les colonnes likes et views à la table videos si elles n'existent pas
-ALTER TABLE videos 
-ADD COLUMN IF NOT EXISTS likes INTEGER DEFAULT 0,
-ADD COLUMN IF NOT EXISTS views INTEGER DEFAULT 0;
-
--- Index pour optimiser les requêtes de tri
-CREATE INDEX IF NOT EXISTS idx_videos_likes ON videos(likes DESC);
-CREATE INDEX IF NOT EXISTS idx_videos_views ON videos(views DESC);
-CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at DESC);
+-- Ajouter les colonnes likes et views si elles n'existent pas
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'videos' AND column_name = 'likes') THEN
+    ALTER TABLE videos ADD COLUMN likes INTEGER DEFAULT 0;
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'videos' AND column_name = 'views') THEN
+    ALTER TABLE videos ADD COLUMN views INTEGER DEFAULT 0;
+  END IF;
+END $$;

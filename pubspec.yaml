@@ -10,37 +10,43 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  
+
+  # Secure storage
+  flutter_secure_storage: ^9.0.0
+
+  # State management
+  flutter_riverpod: ^2.4.0
+  provider: ^6.1.1
+
   # Supabase
   supabase_flutter: ^2.3.4
-  
+
   # UI & Navigation
   cupertino_icons: ^1.0.6
   flutter_svg: ^2.0.9
-  
+
   # Google Sign In natif pour Android
   google_sign_in: ^6.2.1
-  
+
   # Image handling - versions compatibles
   image_picker: ^1.0.7
-  
-  # State Management
-  provider: ^6.1.1
-  
+
   # Storage
   shared_preferences: ^2.2.2
-  
+
   # Utils
   intl: ^0.19.0
-  
+
   # Location & Maps
   geolocator: ^11.0.0
   flutter_map: ^6.1.0
   latlong2: ^0.9.0
 
+  # Video
   video_player: ^2.10.0
 
 dev_dependencies:
+  mockito: ^5.4.0
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0

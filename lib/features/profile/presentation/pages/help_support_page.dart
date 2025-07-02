@@ -77,7 +77,7 @@ class HelpSupportPage extends StatelessWidget {
             'Utilisez la barre de recherche dans l\'onglet Recettes ou filtrez par catégorie.',
       },
       {
-        'question': 'Mes données sont-elles sécurisées ?',
+        'question': 'Mes donn��es sont-elles sécurisées ?',
         'answer':
             'Oui, nous utilisons Firebase pour sécuriser vos données avec un chiffrement de niveau entreprise.',
       },

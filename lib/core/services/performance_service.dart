@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as developer;
+import 'package:flutter/foundation.dart';
 
 class PerformanceService {
   static final Map<String, DateTime> _startTimes = {};
@@ -17,7 +18,7 @@ class PerformanceService {
     final duration = DateTime.now().difference(startTime);
     _addMetric(operation, duration);
     
-    if (AppConfig.enableDebugLogs) {
+    if (kDebugMode) {
       developer.log('Performance: $operation took ${duration.inMilliseconds}ms');
     }
     
@@ -36,10 +37,14 @@ class PerformanceService {
   
   // Memory Monitoring
   static Future<void> logMemoryUsage() async {
-    if (!AppConfig.enableDebugLogs) return;
+    if (!kDebugMode) return;
     
-    final info = await developer.Service.getInfo();
-    developer.log('Memory Usage: ${info.serverUri}');
+    try {
+      final info = await developer.Service.getInfo();
+      developer.log('Memory Usage: ${info.serverUri}');
+    } catch (e) {
+      developer.log('Could not get memory info: $e');
+    }
   }
   
   // Network Performance
