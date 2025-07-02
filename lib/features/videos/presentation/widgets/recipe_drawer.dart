@@ -75,15 +75,16 @@ class _RecipeDrawerState extends State<RecipeDrawer>
         _hasError = false;
       });
 
-      final results = await Future.wait([
-        RecipeService.getRecipeById(widget.recipeId),
-        RecipeService.getRecipeProducts(widget.recipeId),
-      ]);
+      // Get the recipe and its ingredients (products)
+      final recipe = await RecipeService.getRecipeById(widget.recipeId);
+      final products = recipe != null && recipe['ingredients'] is List
+          ? List<Map<String, dynamic>>.from(recipe['ingredients'])
+          : <Map<String, dynamic>>[];
 
       if (mounted) {
         setState(() {
-          _recipe = results[0] as Map<String, dynamic>?;
-          _products = results[1] as List<Map<String, dynamic>>;
+          _recipe = recipe;
+          _products = products;
           _isLoading = false;
         });
       }
@@ -107,17 +108,14 @@ class _RecipeDrawerState extends State<RecipeDrawer>
 
     try {
       HapticFeedback.mediumImpact();
-      
-      for (final product in _products) {
-        await CartService.addToCart(
-          productId: product['id'].toString(),
-          quantity: product['quantity'] ?? 1,
-        );
-      }
+      await CartService.addRecipeToCart(
+        recipeId: widget.recipeId,
+        recipeName: _recipe?['title'] ?? '',
+        ingredients: _products,
+      );
 
       if (mounted) {
         widget.onCartUpdated?.call();
-        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
@@ -135,7 +133,6 @@ class _RecipeDrawerState extends State<RecipeDrawer>
             margin: const EdgeInsets.all(16),
           ),
         );
-        
         await Future.delayed(const Duration(milliseconds: 500));
         _closeDrawer();
       }
@@ -186,9 +183,9 @@ class _RecipeDrawerState extends State<RecipeDrawer>
               offset: Offset(0, MediaQuery.of(context).size.height * _slideAnimation.value),
               child: Container(
                 height: MediaQuery.of(context).size.height * 0.85,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.only(
+                  borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(25),
                     topRight: Radius.circular(25),
                   ),
@@ -680,13 +677,11 @@ class _RecipeDrawerState extends State<RecipeDrawer>
             child: IconButton(
               onPressed: () async {
                 try {
-                  await CartService.addToCart(
-                    productId: product['id'].toString(),
+                  await CartService.addProductToPersonalCart(
+                    productId: product['product_id']?.toString() ?? product['id'].toString(),
                     quantity: product['quantity'] ?? 1,
                   );
-                  
                   HapticFeedback.lightImpact();
-                  
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -720,7 +715,6 @@ class _RecipeDrawerState extends State<RecipeDrawer>
               icon: const Icon(
                 Icons.add_shopping_cart,
                 color: AppColors.primary,
-                size: 20,
               ),
             ),
           ),
