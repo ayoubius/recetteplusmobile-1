@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import '../../../../core/services/video_service.dart';
 import '../../../../core/services/simple_video_manager.dart';
