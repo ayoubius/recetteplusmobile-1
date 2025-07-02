@@ -1,4 +1,3 @@
-
 class OrderStatusHistory {
   final String id;
   final String orderId;

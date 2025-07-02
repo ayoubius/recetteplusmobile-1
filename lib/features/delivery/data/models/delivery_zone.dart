@@ -1,4 +1,3 @@
-
 class DeliveryZone {
   final String id;
   final String name;

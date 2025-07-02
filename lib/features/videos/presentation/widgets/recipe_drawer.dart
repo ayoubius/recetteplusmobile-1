@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/services/recipe_service.dart';
+import '../../../../core/services/cart_service.dart';
 
 class RecipeDrawer extends StatefulWidget {
   final String recipeId;
@@ -20,7 +21,7 @@ class RecipeDrawer extends StatefulWidget {
 }
 
 class _RecipeDrawerState extends State<RecipeDrawer>
-    with TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _slideAnimation;
   late Animation<double> _fadeAnimation;
@@ -29,23 +30,18 @@ class _RecipeDrawerState extends State<RecipeDrawer>
   List<Map<String, dynamic>> _products = [];
   bool _isLoading = true;
   bool _hasError = false;
-  bool _isFavorite = false;
-  bool _isAddingToCart = false;
   String? _errorMessage;
+  bool _isAddingToCart = false;
 
   @override
   void initState() {
     super.initState();
-    _setupAnimations();
-    _loadRecipeData();
-  }
-
-  void _setupAnimations() {
+    
     _animationController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
-
+    
     _slideAnimation = Tween<double>(
       begin: 1.0,
       end: 0.0,
@@ -53,7 +49,7 @@ class _RecipeDrawerState extends State<RecipeDrawer>
       parent: _animationController,
       curve: Curves.easeOutCubic,
     ));
-
+    
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -62,134 +58,106 @@ class _RecipeDrawerState extends State<RecipeDrawer>
       curve: Curves.easeOut,
     ));
 
+    _loadRecipeData();
     _animationController.forward();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadRecipeData() async {
     try {
-      // Charger la recette
-      final recipe = await RecipeService.getRecipeById(widget.recipeId);
-      if (recipe != null) {
-        setState(() {
-          _recipe = recipe;
-        });
+      setState(() {
+        _isLoading = true;
+        _hasError = false;
+      });
 
-        // Charger les produits liés (simulation)
-        await _loadRecipeProducts();
+      final results = await Future.wait([
+        RecipeService.getRecipeById(widget.recipeId),
+        RecipeService.getRecipeProducts(widget.recipeId),
+      ]);
 
-        // Vérifier si en favoris
-        final isFav = await RecipeService.isRecipeFavorite(widget.recipeId);
+      if (mounted) {
         setState(() {
-          _isFavorite = isFav;
+          _recipe = results[0] as Map<String, dynamic>?;
+          _products = results[1] as List<Map<String, dynamic>>;
           _isLoading = false;
         });
-
-        // Ajouter à l'historique et incrémenter les vues
-        await RecipeService.addRecipeToHistory(widget.recipeId);
-        await RecipeService.incrementRecipeViews(widget.recipeId);
-      } else {
+      }
+    } catch (e) {
+      if (mounted) {
         setState(() {
           _hasError = true;
-          _errorMessage = 'Recette introuvable';
+          _errorMessage = e.toString();
           _isLoading = false;
         });
       }
-    } catch (e) {
-      setState(() {
-        _hasError = true;
-        _errorMessage = e.toString();
-        _isLoading = false;
-      });
     }
   }
 
-  Future<void> _loadRecipeProducts() async {
-    if (_recipe == null) return;
-
-    try {
-      final ingredients = _recipe!['ingredients'] as List<dynamic>? ?? [];
-      final List<Map<String, dynamic>> products = [];
-
-      // Simulation de produits liés aux ingrédients
-      for (int i = 0; i < ingredients.length && i < 5; i++) {
-        final ingredient = ingredients[i];
-        if (ingredient is Map<String, dynamic>) {
-          // Créer un produit simulé basé sur l'ingrédient
-          products.add({
-            'id': 'product_${i + 1}',
-            'name': ingredient['name'] ?? 'Produit ${i + 1}',
-            'price': (10.0 + (i * 2.5)),
-            'unit': ingredient['unit'] ?? 'kg',
-            'recipe_quantity': ingredient['quantity'] ?? 1,
-            'recipe_unit': ingredient['unit'] ?? 'pièce',
-            'in_stock': i % 3 != 0, // Simulation de stock
-            'image': null, // Pas d'image pour la simulation
-          });
-        }
-      }
-
-      setState(() {
-        _products = products;
-      });
-    } catch (e) {
-      // Ignore product loading errors
-    }
-  }
-
-  Future<void> _close() async {
-    await _animationController.reverse();
-    widget.onClose();
-  }
-
-  Future<void> _toggleFavorite() async {
-    HapticFeedback.lightImpact();
-    
-    final newFavoriteStatus = await RecipeService.toggleRecipeFavorite(widget.recipeId);
-    if (mounted) {
-      setState(() {
-        _isFavorite = newFavoriteStatus;
-      });
-
-      _showSnackBar(
-        _isFavorite
-            ? 'Recette ajoutée aux favoris'
-            : 'Recette retirée des favoris',
-        AppColors.primary,
-      );
-    }
-  }
-
-  Future<void> _addRecipeToCart() async {
-    if (_recipe == null) return;
+  Future<void> _addAllToCart() async {
+    if (_products.isEmpty || _isAddingToCart) return;
 
     setState(() {
       _isAddingToCart = true;
     });
 
     try {
-      // Simulation d'ajout au panier
-      await Future.delayed(const Duration(seconds: 1));
+      HapticFeedback.mediumImpact();
       
+      for (final product in _products) {
+        await CartService.addToCart(
+          productId: product['id'].toString(),
+          quantity: product['quantity'] ?? 1,
+        );
+      }
+
       if (mounted) {
-        HapticFeedback.lightImpact();
-        _showSnackBar(
-          'Ingrédients de "${_recipe!['title']}" ajoutés au panier',
-          Colors.green,
-          action: SnackBarAction(
-            label: 'Voir panier',
-            textColor: Colors.white,
-            onPressed: () {
-              widget.onCartUpdated?.call();
-              _close();
-            },
+        widget.onCartUpdated?.call();
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 12),
+                Text('${_products.length} produits ajoutés au panier'),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            margin: const EdgeInsets.all(16),
           ),
         );
-
-        widget.onCartUpdated?.call();
+        
+        await Future.delayed(const Duration(milliseconds: 500));
+        _closeDrawer();
       }
     } catch (e) {
       if (mounted) {
-        _showSnackBar('Erreur lors de l\'ajout au panier', Colors.red);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 12),
+                const Expanded(child: Text('Erreur lors de l\'ajout au panier')),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            margin: const EdgeInsets.all(16),
+          ),
+        );
       }
     } finally {
       if (mounted) {
@@ -200,26 +168,9 @@ class _RecipeDrawerState extends State<RecipeDrawer>
     }
   }
 
-  void _shareRecipe() {
-    HapticFeedback.lightImpact();
-    _showSnackBar('Fonctionnalité de partage bientôt disponible !', AppColors.primary);
-  }
-
-  void _showSnackBar(String message, Color backgroundColor, {SnackBarAction? action}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: backgroundColor,
-        duration: const Duration(seconds: 3),
-        action: action,
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
+  Future<void> _closeDrawer() async {
+    await _animationController.reverse();
+    widget.onClose();
   }
 
   @override
@@ -227,53 +178,171 @@ class _RecipeDrawerState extends State<RecipeDrawer>
     return AnimatedBuilder(
       animation: _animationController,
       builder: (context, child) {
-        return Transform.translate(
-          offset: Offset(
-              0, MediaQuery.of(context).size.height * _slideAnimation.value),
-          child: Opacity(
-            opacity: _fadeAnimation.value,
-            child: Container(
-              height: MediaQuery.of(context).size.height * 0.9,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    margin: const EdgeInsets.only(top: 12),
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+        return Container(
+          color: Colors.black.withOpacity(0.5 * _fadeAnimation.value),
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Transform.translate(
+              offset: Offset(0, MediaQuery.of(context).size.height * _slideAnimation.value),
+              child: Container(
+                height: MediaQuery.of(context).size.height * 0.85,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(25),
+                    topRight: Radius.circular(25),
                   ),
-
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Détails de la recette',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, -5),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    // Handle bar
+                    Container(
+                      margin: const EdgeInsets.only(top: 12),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    
+                    // Header
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        children: [
+                          GestureDetector(
+                            onTap: _closeDrawer,
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[100],
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.close,
+                                size: 20,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          const Expanded(
+                            child: Text(
+                              'Recette & Ingrédients',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ),
+                          if (_products.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                '${_products.length} produits',
+                                style: const TextStyle(
+                                  color: AppColors.primary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    
+                    // Content
+                    Expanded(
+                      child: _buildContent(),
+                    ),
+                    
+                    // Bottom action button
+                    if (_products.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, -5),
+                            ),
+                          ],
+                        ),
+                        child: SafeArea(
+                          child: SizedBox(
+                            width: double.infinity,
+                            height: 56,
+                            child: ElevatedButton(
+                              onPressed: _isAddingToCart ? null : _addAllToCart,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                disabledBackgroundColor: Colors.grey[300],
+                              ),
+                              child: _isAddingToCart
+                                  ? const Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                          ),
+                                        ),
+                                        SizedBox(width: 12),
+                                        Text(
+                                          'Ajout en cours...',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(Icons.shopping_cart_outlined, size: 20),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Ajouter tout au panier (${_products.length})',
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
                           ),
                         ),
-                        IconButton(
-                          onPressed: _close,
-                          icon: const Icon(Icons.close),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  Expanded(
-                    child: _buildContent(),
-                  ),
-                ],
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -285,13 +354,24 @@ class _RecipeDrawerState extends State<RecipeDrawer>
   Widget _buildContent() {
     if (_isLoading) {
       return const Center(
-        child: CircularProgressIndicator(
-          color: AppColors.primary,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: AppColors.primary),
+            SizedBox(height: 16),
+            Text(
+              'Chargement de la recette...',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 16,
+              ),
+            ),
+          ],
         ),
       );
     }
 
-    if (_hasError || _recipe == null) {
+    if (_hasError) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -302,22 +382,34 @@ class _RecipeDrawerState extends State<RecipeDrawer>
               color: Colors.grey[400],
             ),
             const SizedBox(height: 16),
-            Text(
-              _errorMessage ?? 'Impossible de charger la recette',
+            const Text(
+              'Erreur de chargement',
               style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            if (_errorMessage != null)
+              Text(
+                _errorMessage!,
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  _isLoading = true;
-                  _hasError = false;
-                });
-                _loadRecipeData();
-              },
+              onPressed: _loadRecipeData,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
               child: const Text('Réessayer'),
             ),
           ],
@@ -326,434 +418,167 @@ class _RecipeDrawerState extends State<RecipeDrawer>
     }
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Image de la recette
-          if (_recipe!['image'] != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                _recipe!['image'],
-                width: double.infinity,
-                height: 200,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    width: double.infinity,
-                    height: 200,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[200],
-                      borderRadius: BorderRadius.circular(12),
+          // Recipe info
+          if (_recipe != null) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.primary.withOpacity(0.1),
+                    AppColors.primary.withOpacity(0.05),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppColors.primary.withOpacity(0.2),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _recipe!['title'] ?? 'Recette',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
                     ),
-                    child: Icon(
-                      Icons.restaurant,
-                      size: 64,
-                      color: Colors.grey[400],
-                    ),
-                  );
-                },
-              ),
-            ),
-
-          const SizedBox(height: 16),
-
-          // Titre et description
-          Text(
-            _recipe!['title'] ?? 'Recette sans titre',
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-
-          if (_recipe!['description'] != null && _recipe!['description'].toString().isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              _recipe!['description'].toString(),
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-
-          const SizedBox(height: 16),
-
-          // Statistiques
-          Row(
-            children: [
-              _buildStatChip(
-                Icons.access_time,
-                '${_recipe!['cook_time'] ?? _recipe!['formatted_time'] ?? '30'} min',
-              ),
-              const SizedBox(width: 12),
-              _buildStatChip(
-                Icons.people,
-                '${_recipe!['servings'] ?? 4} pers.',
-              ),
-              const SizedBox(width: 12),
-              _buildStatChip(
-                Icons.star,
-                '${_recipe!['rating'] ?? 4.5}/5',
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // Difficulté et vues
-          Row(
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    const Text(
-                      'Difficulté: ',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                  ),
+                  if (_recipe!['description'] != null) ...[
+                    const SizedBox(height: 8),
                     Text(
-                      _recipe!['difficulty'] ?? 'Moyen',
+                      _recipe!['description'],
                       style: TextStyle(
-                        fontSize: 16,
-                        color: _getDifficultyColor(_recipe!['difficulty']),
-                        fontWeight: FontWeight.w500,
+                        fontSize: 14,
+                        color: Colors.grey[700],
+                        height: 1.4,
                       ),
                     ),
                   ],
-                ),
-              ),
-              Text(
-                '${_recipe!['view_count'] ?? 0} vues',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-
-          // Boutons d'action
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _isAddingToCart ? null : _addRecipeToCart,
-                  icon: _isAddingToCart
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : const Icon(Icons.shopping_cart),
-                  label:
-                      Text(_isAddingToCart ? 'Ajout...' : 'Ajouter au panier'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      if (_recipe!['prep_time'] != null) ...[
+                        _buildInfoChip(
+                          Icons.access_time,
+                          '${_recipe!['prep_time']} min',
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      if (_recipe!['servings'] != null)
+                        _buildInfoChip(
+                          Icons.people,
+                          '${_recipe!['servings']} pers.',
+                        ),
+                    ],
                   ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              IconButton(
-                onPressed: _toggleFavorite,
-                icon: Icon(
-                  _isFavorite ? Icons.favorite : Icons.favorite_border,
-                  color: _isFavorite ? Colors.red : Colors.grey,
-                ),
-              ),
-              IconButton(
-                onPressed: _shareRecipe,
-                icon: const Icon(Icons.share),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-
-          // Produits liés
-          if (_products.isNotEmpty) ...[
-            const Text(
-              'Produits nécessaires',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            ...(_products.map((product) => _buildProductCard(product))),
             const SizedBox(height: 24),
           ],
 
-          // Ingrédients
-          const Text(
-            'Ingrédients',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          ...(_recipe!['ingredients'] as List<dynamic>? ?? []).map(
-            (ingredient) => _buildIngredientCard(ingredient),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Instructions
-          const Text(
-            'Instructions',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          ...(_recipe!['instructions'] as List<dynamic>? ?? []).asMap().entries.map(
-                (entry) => _buildInstructionStep(entry.key + 1, entry.value.toString()),
-              ),
-
-          const SizedBox(height: 32),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProductCard(Map<String, dynamic> product) {
-    double price = 0.0;
-    final rawPrice = product['price'];
-    if (rawPrice is double) {
-      price = rawPrice;
-    } else if (rawPrice is int) {
-      price = rawPrice.toDouble();
-    } else if (rawPrice is String) {
-      price = double.tryParse(rawPrice) ?? 0.0;
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          // Image du produit
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: product['image'] != null
-                ? Image.network(
-                    product['image'],
-                    width: 60,
-                    height: 60,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        width: 60,
-                        height: 60,
-                        color: Colors.grey[300],
-                        child: Icon(
-                          Icons.image_not_supported,
-                          size: 24,
-                          color: Colors.grey[500],
-                        ),
-                      );
-                    },
-                  )
-                : Container(
-                    width: 60,
-                    height: 60,
-                    color: Colors.grey[300],
-                    child: Icon(
-                      Icons.shopping_basket,
-                      size: 24,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-          ),
-          const SizedBox(width: 12),
-          
-          // Détails du produit
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          // Products section
+          if (_products.isNotEmpty) ...[
+            Row(
               children: [
-                Text(
-                  product['name'] ?? 'Produit sans nom',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${product['recipe_quantity']} ${product['recipe_unit']} nécessaire(s)',
+                const Text(
+                  'Ingrédients nécessaires',
                   style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Text(
-                      '${price.toStringAsFixed(2)} € / ${product['unit'] ?? 'unité'}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.primary,
-                      ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${_products.length} produits',
+                    style: const TextStyle(
+                      color: Colors.green,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: (product['in_stock'] ?? false)
-                            ? Colors.green[100]
-                            : Colors.red[100],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        (product['in_stock'] ?? false) ? 'En stock' : 'Rupture',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: (product['in_stock'] ?? false)
-                              ? Colors.green[700]
-                              : Colors.red[700],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIngredientCard(dynamic ingredient) {
-    if (ingredient is! Map<String, dynamic>) return const SizedBox.shrink();
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: const BoxDecoration(
-              color: AppColors.primary,
-              shape: BoxShape.circle,
+            const SizedBox(height: 16),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _products.length,
+              separatorBuilder: (context, index) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final product = _products[index];
+                return _buildProductCard(product);
+              },
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              '${ingredient['quantity'] ?? ''} ${ingredient['unit'] ?? ''} ${ingredient['name'] ?? 'Ingrédient'}',
-              style: const TextStyle(fontSize: 16),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInstructionStep(int step, String instruction) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Center(
-              child: Text(
-                step.toString(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
+            const SizedBox(height: 100),
+          ] else ...[
+            const Center(
+              child: Column(
+                children: [
+                  SizedBox(height: 40),
+                  Icon(
+                    Icons.shopping_basket_outlined,
+                    size: 64,
+                    color: Colors.grey,
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Aucun produit disponible',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                instruction,
-                style: const TextStyle(fontSize: 16),
-              ),
-            ),
-          ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildStatChip(IconData icon, String text) {
+  Widget _buildInfoChip(IconData icon, String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(20),
+        color: Colors.white.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.primary.withOpacity(0.3),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
             icon,
-            size: 16,
-            color: Colors.grey[600],
+            size: 14,
+            color: AppColors.primary,
           ),
           const SizedBox(width: 4),
           Text(
             text,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: AppColors.primary,
             ),
           ),
         ],
@@ -761,16 +586,146 @@ class _RecipeDrawerState extends State<RecipeDrawer>
     );
   }
 
-  Color _getDifficultyColor(String? difficulty) {
-    switch (difficulty?.toLowerCase()) {
-      case 'facile':
-        return Colors.green;
-      case 'moyen':
-        return Colors.orange;
-      case 'difficile':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
+  Widget _buildProductCard(Map<String, dynamic> product) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.grey[200]!,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Product image
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              width: 60,
+              height: 60,
+              color: Colors.grey[100],
+              child: product['image_url'] != null
+                  ? Image.network(
+                      product['image_url'],
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Icon(
+                          Icons.shopping_basket,
+                          color: Colors.grey[400],
+                          size: 24,
+                        );
+                      },
+                    )
+                  : Icon(
+                      Icons.shopping_basket,
+                      color: Colors.grey[400],
+                      size: 24,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          
+          // Product info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product['name'] ?? 'Produit',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                if (product['quantity'] != null)
+                  Text(
+                    'Quantité: ${product['quantity']}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                if (product['price'] != null)
+                  Text(
+                    '${product['price']}€',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          
+          // Add to cart button
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IconButton(
+              onPressed: () async {
+                try {
+                  await CartService.addToCart(
+                    productId: product['id'].toString(),
+                    quantity: product['quantity'] ?? 1,
+                  );
+                  
+                  HapticFeedback.lightImpact();
+                  
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('${product['name']} ajouté au panier'),
+                        backgroundColor: Colors.green,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        margin: const EdgeInsets.all(16),
+                        duration: const Duration(seconds: 1),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('Erreur lors de l\'ajout'),
+                        backgroundColor: Colors.red,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        margin: const EdgeInsets.all(16),
+                      ),
+                    );
+                  }
+                }
+              },
+              icon: const Icon(
+                Icons.add_shopping_cart,
+                color: AppColors.primary,
+                size: 20,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
