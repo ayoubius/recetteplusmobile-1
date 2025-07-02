@@ -7,14 +7,14 @@ import '../../../../core/constants/app_colors.dart';
 import '../widgets/simple_video_player.dart';
 import '../widgets/recipe_drawer.dart';
 
-class VideosPage extends StatefulWidget {
-  const VideosPage({super.key});
+class VideosPageRefactored extends StatefulWidget {
+  const VideosPageRefactored({super.key});
 
   @override
-  State<VideosPage> createState() => _VideosPageState();
+  State<VideosPageRefactored> createState() => _VideosPageRefactoredState();
 }
 
-class _VideosPageState extends State<VideosPage>
+class _VideosPageRefactoredState extends State<VideosPageRefactored>
     with WidgetsBindingObserver {
   final PageController _pageController = PageController();
   final TextEditingController _searchController = TextEditingController();
