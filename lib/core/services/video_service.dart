@@ -1,65 +1,136 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 
 class VideoService {
   static final SupabaseClient _supabase = SupabaseService.client;
 
-  // Récupérer toutes les vidéos avec pagination
+  // Récupérer les vidéos avec pagination
   static Future<List<Map<String, dynamic>>> getVideos({
+    String? searchQuery,
+    String? category,
     int limit = 20,
     int offset = 0,
-    String? category,
-    String? searchQuery,
   }) async {
     try {
-      var query = _supabase
-          .from('videos')
-          .select('*')
-          .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1);
-
-      if (category != null && category.isNotEmpty) {
-        query = query.eq('category', category);
-      }
-
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        query = query.ilike('title', '%$searchQuery%');
-      }
-
-      final response = await query;
-      return List<Map<String, dynamic>>.from(response);
+      return await SupabaseService.getVideos(
+        searchQuery: searchQuery,
+        category: category,
+        limit: limit,
+        offset: offset,
+      );
     } catch (e) {
-      throw Exception('Erreur lors du chargement des vidéos: $e');
+      if (kDebugMode) {
+        print('❌ Erreur VideoService.getVideos: $e');
+      }
+      return [];
+    }
+  }
+
+  // Récupérer les vidéos avec pagination infinie
+  static Future<List<Map<String, dynamic>>> getInfiniteVideos({
+    required int offset,
+    required int batchSize,
+    List<String> excludeIds = const [],
+  }) async {
+    try {
+      if (SupabaseService.isInitialized) {
+        var query = SupabaseService.client.from('videos').select('*');
+        if (excludeIds.isNotEmpty) {
+          query = query.not('id', 'in', '(${excludeIds.join(',')})');
+        }
+        final videos = await query
+            .order('created_at', ascending: false)
+            .range(offset, offset + batchSize - 1);
+        if (videos.isNotEmpty) {
+          return videos;
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur VideoService.getInfiniteVideos: $e');
+      }
+      return [];
+    }
+    return [];
+  }
+
+  // Rechercher des vidéos
+  static Future<List<Map<String, dynamic>>> searchVideos({
+    required String searchQuery,
+    String? category,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      return await SupabaseService.getVideos(
+        searchQuery: searchQuery,
+        category: category,
+        limit: limit,
+        offset: offset,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur VideoService.searchVideos: $e');
+      }
+      return [];
     }
   }
 
   // Récupérer une vidéo par ID
   static Future<Map<String, dynamic>?> getVideoById(String videoId) async {
     try {
-      final response = await _supabase
-          .from('videos')
-          .select('*')
-          .eq('id', videoId)
-          .single();
-
-      return response;
+      final videos = await SupabaseService.getVideos(limit: 100);
+      return videos.firstWhere(
+        (video) => video['id'] == videoId,
+        orElse: () => {},
+      );
     } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur VideoService.getVideoById: $e');
+      }
       return null;
+    }
+  }
+
+  // Récupérer les catégories de vidéos
+  static Future<List<String>> getVideoCategories() async {
+    try {
+      final videos = await SupabaseService.getVideos(limit: 100);
+      final categories = videos
+          .map((video) => video['category'] as String?)
+          .where((category) => category != null)
+          .cast<String>()
+          .toSet()
+          .toList();
+      return categories;
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la récupération des catégories: $e');
+      }
+      return ['Technique', 'Boulangerie', 'Pâtisserie', 'Cuisine du monde'];
     }
   }
 
   // Liker une vidéo
   static Future<bool> likeVideo(String videoId) async {
     try {
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) return false;
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, impossible de liker la vidéo.');
+        }
+        return false;
+      }
 
-      // Vérifier si déjà liké
-      final existingLike = await _supabase
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) return false;
+
+      // Vérifier si l'utilisateur a déjà liké cette vidéo
+      final existingLike = await SupabaseService.client
           .from('video_likes')
           .select('id')
+          .eq('user_id', user.id)
           .eq('video_id', videoId)
-          .eq('profile_id', userId)
           .maybeSingle();
 
       if (existingLike != null) {
@@ -67,95 +138,186 @@ class VideoService {
       }
 
       // Ajouter le like
-      await _supabase.from('video_likes').insert({
+      await SupabaseService.client.from('video_likes').insert({
+        'user_id': user.id,
         'video_id': videoId,
-        'profile_id': userId,
+        'created_at': DateTime.now().toIso8601String(),
       });
 
       // Incrémenter le compteur de likes
-      await _supabase.rpc('increment_video_likes', params: {
-        'video_id': videoId,
-      });
+      final currentVideo = await SupabaseService.client
+          .from('videos')
+          .select('likes')
+          .eq('id', videoId)
+          .maybeSingle();
+
+      if (currentVideo != null) {
+        final currentLikes = currentVideo['likes'] as int? ?? 0;
+        await SupabaseService.client
+            .from('videos')
+            .update({'likes': currentLikes + 1}).eq('id', videoId);
+      }
 
       return true;
     } catch (e) {
-      throw Exception('Erreur lors du like: $e');
+      if (kDebugMode) {
+        print('❌ Erreur lors du like: $e');
+      }
+      return false;
     }
   }
 
   // Unliker une vidéo
   static Future<bool> unlikeVideo(String videoId) async {
     try {
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) return false;
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, impossible d\'unliker la vidéo.');
+        }
+        return false;
+      }
+
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) return false;
 
       // Supprimer le like
-      await _supabase
+      await SupabaseService.client
           .from('video_likes')
           .delete()
-          .eq('video_id', videoId)
-          .eq('profile_id', userId);
+          .eq('user_id', user.id)
+          .eq('video_id', videoId);
 
       // Décrémenter le compteur de likes
-      await _supabase.rpc('decrement_video_likes', params: {
-        'video_id': videoId,
-      });
+      final currentVideo = await SupabaseService.client
+          .from('videos')
+          .select('likes')
+          .eq('id', videoId)
+          .maybeSingle();
+
+      if (currentVideo != null) {
+        final currentLikes = currentVideo['likes'] as int? ?? 0;
+        await SupabaseService.client.from('videos').update({
+          'likes': (currentLikes - 1).clamp(0, double.infinity).toInt()
+        }).eq('id', videoId);
+      }
 
       return true;
     } catch (e) {
-      throw Exception('Erreur lors du unlike: $e');
+      if (kDebugMode) {
+        print('❌ Erreur lors du unlike: $e');
+      }
+      return false;
     }
   }
 
   // Vérifier si une vidéo est likée
   static Future<bool> isVideoLiked(String videoId) async {
     try {
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) return false;
+      if (!SupabaseService.isInitialized) {
+        return false;
+      }
 
-      final response = await _supabase
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) return false;
+
+      final existingLike = await SupabaseService.client
           .from('video_likes')
           .select('id')
+          .eq('user_id', user.id)
           .eq('video_id', videoId)
-          .eq('profile_id', userId)
           .maybeSingle();
 
-      return response != null;
+      return existingLike != null;
     } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la vérification du like: $e');
+      }
       return false;
     }
   }
 
-  // Récupérer les catégories de vidéos
-  static Future<List<String>> getVideoCategories() async {
+  // Incrémenter le nombre de vues d'une vidéo
+  static Future<void> incrementViews(String videoId) async {
     try {
-      final response = await _supabase
-          .from('videos')
-          .select('category')
-          .not('category', 'is', null);
-
-      final categories = <String>{};
-      for (final item in response) {
-        final category = item['category'] as String?;
-        if (category != null && category.isNotEmpty) {
-          categories.add(category);
-        }
+      if (kDebugMode) {
+        print('📊 Incrémentation des vues pour la vidéo: $videoId');
       }
-
-      return categories.toList()..sort();
+      // TODO: Implémenter l'incrémentation des vues dans Supabase
     } catch (e) {
-      return [];
+      if (kDebugMode) {
+        print('❌ Erreur VideoService.incrementViews: $e');
+      }
     }
   }
 
-  // Incrémenter le nombre de vues
-  static Future<void> incrementViewCount(String videoId) async {
+  // Toggle like/unlike
+  static Future<void> toggleLike(String videoId) async {
     try {
-      await _supabase.rpc('increment_video_views', params: {
-        'video_id': videoId,
-      });
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('❌ Supabase non initialisé, impossible de toggle le like.');
+        }
+        return;
+      }
+
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) return;
+
+      // Vérifier si l'utilisateur a déjà liké cette vidéo
+      final existingLike = await SupabaseService.client
+          .from('video_likes')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('video_id', videoId)
+          .maybeSingle();
+
+      if (existingLike != null) {
+        // Supprimer le like
+        await SupabaseService.client
+            .from('video_likes')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('video_id', videoId);
+
+        // Décrémenter le compteur de likes
+        final currentVideo = await SupabaseService.client
+            .from('videos')
+            .select('likes')
+            .eq('id', videoId)
+            .maybeSingle();
+
+        if (currentVideo != null) {
+          final currentLikes = currentVideo['likes'] as int? ?? 0;
+          await SupabaseService.client.from('videos').update({
+            'likes': (currentLikes - 1).clamp(0, double.infinity).toInt()
+          }).eq('id', videoId);
+        }
+      } else {
+        // Ajouter le like
+        await SupabaseService.client.from('video_likes').insert({
+          'user_id': user.id,
+          'video_id': videoId,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+
+        // Incrémenter le compteur de likes
+        final currentVideo = await SupabaseService.client
+            .from('videos')
+            .select('likes')
+            .eq('id', videoId)
+            .maybeSingle();
+
+        if (currentVideo != null) {
+          final currentLikes = currentVideo['likes'] as int? ?? 0;
+          await SupabaseService.client
+              .from('videos')
+              .update({'likes': currentLikes + 1}).eq('id', videoId);
+        }
+      }
     } catch (e) {
-      // Ignore les erreurs de vue
+      if (kDebugMode) {
+        print('❌ Erreur lors du toggle like: $e');
+      }
     }
   }
 

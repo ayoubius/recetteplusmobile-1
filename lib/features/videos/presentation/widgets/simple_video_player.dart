@@ -5,7 +5,6 @@ import 'dart:async';
 import '../../../../core/services/simple_video_manager.dart';
 import '../../../../core/services/video_service.dart';
 import '../../../../core/constants/app_colors.dart';
-import '../widgets/recipe_drawer.dart';
 
 class SimpleVideoPlayer extends StatefulWidget {
   final Map<String, dynamic> video;
@@ -149,27 +148,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
-      ),
-    );
-  }
-
-  void _showRecipeDrawer() {
-    final recipeId = widget.video['recipe_id']?.toString();
-    if (recipeId == null) {
-      _showFeedback('Aucune recette associée', Icons.info, AppColors.primary);
-      return;
-    }
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => RecipeDrawer(
-        recipeId: recipeId,
-        onClose: () => Navigator.of(context).pop(),
-        onCartUpdated: () {
-          // Callback pour mise à jour du panier
-        },
       ),
     );
   }
@@ -601,8 +579,8 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
       duration: const Duration(milliseconds: 200),
       child: Center(
         child: Container(
-          width: 60,
-          height: 60,
+          width: 80,
+          height: 80,
           decoration: BoxDecoration(
             color: Colors.black.withOpacity(0.7),
             shape: BoxShape.circle,
@@ -610,7 +588,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
           child: Icon(
             isPlaying ? Icons.pause : Icons.play_arrow,
             color: Colors.white,
-            size: 30,
+            size: 40,
           ),
         ),
       ),
@@ -830,12 +808,12 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                         label: 'Partager',
                         onPressed: widget.onShare ?? () {},
                       ),
-                      if (widget.video['recipe_id'] != null) ...[
+                      if (widget.onRecipePressed != null) ...[
                         const SizedBox(height: 20),
                         _buildActionButton(
                           icon: Icons.restaurant_menu,
                           label: 'Recette',
-                          onPressed: _showRecipeDrawer,
+                          onPressed: widget.onRecipePressed!,
                           isHighlighted: true,
                         ),
                       ],

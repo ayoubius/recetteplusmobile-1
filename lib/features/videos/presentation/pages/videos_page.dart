@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'dart:async';
-import '../../../../core/services/video_service.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/services/video_service.dart';
 import '../widgets/simple_video_player.dart';
 
 class VideosPage extends StatefulWidget {
@@ -17,24 +15,18 @@ class _VideosPageState extends State<VideosPage>
     with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   final PageController _pageController = PageController();
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<Map<String, dynamic>> _videos = [];
   List<String> _categories = [];
   String? _selectedCategory;
   String _searchQuery = '';
-  
   bool _isLoading = true;
   bool _isLoadingMore = false;
   bool _hasError = false;
-  bool _hasMoreVideos = true;
-  String? _errorMessage;
-  
-  int _currentVideoIndex = 0;
+  int _currentIndex = 0;
   int _currentPage = 0;
-  static const int _videosPerPage = 10;
-  
-  Timer? _searchDebouncer;
-  Timer? _pauseTimer;
+  static const int _pageSize = 10;
+  bool _showRecipeDrawer = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -44,7 +36,7 @@ class _VideosPageState extends State<VideosPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadInitialData();
-    _setupSearchListener();
+    _searchController.addListener(_onSearchChanged);
   }
 
   @override
@@ -52,8 +44,6 @@ class _VideosPageState extends State<VideosPage>
     WidgetsBinding.instance.removeObserver(this);
     _pageController.dispose();
     _searchController.dispose();
-    _searchDebouncer?.cancel();
-    _pauseTimer?.cancel();
     super.dispose();
   }
 
@@ -61,141 +51,168 @@ class _VideosPageState extends State<VideosPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     
-    // Pause automatique quand l'app passe en arrière-plan
+    // Pause toutes les vidéos quand l'app passe en arrière-plan
     if (state == AppLifecycleState.paused || 
         state == AppLifecycleState.inactive) {
-      _pauseCurrentVideo();
+      // Les vidéos se mettront automatiquement en pause via isVisible=false
     }
-  }
-
-  void _pauseCurrentVideo() {
-    // La pause sera gérée par le SimpleVideoPlayer via isActive
-    setState(() {});
-  }
-
-  void _setupSearchListener() {
-    _searchController.addListener(() {
-      final query = _searchController.text.trim();
-      if (query != _searchQuery) {
-        _searchDebouncer?.cancel();
-        _searchDebouncer = Timer(const Duration(milliseconds: 500), () {
-          _performSearch(query);
-        });
-      }
-    });
   }
 
   Future<void> _loadInitialData() async {
     try {
-      // Charger les catégories
-      final categories = await VideoService.getVideoCategories();
-      
-      // Charger les vidéos
-      await _loadVideos(refresh: true);
-      
+      setState(() {
+        _isLoading = true;
+        _hasError = false;
+      });
+
+      final results = await Future.wait([
+        VideoService.getVideos(limit: _pageSize, offset: 0),
+        VideoService.getVideoCategories(),
+      ]);
+
       if (mounted) {
         setState(() {
-          _categories = categories;
+          _videos = results[0] as List<Map<String, dynamic>>;
+          _categories = results[1] as List<String>;
           _isLoading = false;
+          _currentPage = 0;
         });
       }
     } catch (e) {
-      if (kDebugMode) {
-        print('Erreur lors du chargement initial: $e');
-      }
       if (mounted) {
         setState(() {
           _hasError = true;
-          _errorMessage = e.toString();
           _isLoading = false;
         });
       }
     }
   }
 
-  Future<void> _loadVideos({bool refresh = false}) async {
-    if (refresh) {
-      _currentPage = 0;
-      _hasMoreVideos = true;
-      _videos.clear();
-    }
-
-    if (!_hasMoreVideos) return;
+  Future<void> _loadMoreVideos() async {
+    if (_isLoadingMore) return;
 
     setState(() {
-      if (refresh) {
-        _isLoading = true;
-      } else {
-        _isLoadingMore = true;
-      }
+      _isLoadingMore = true;
     });
 
     try {
-      final videos = await VideoService.getVideos(
-        limit: _videosPerPage,
-        offset: _currentPage * _videosPerPage,
+      final nextPage = _currentPage + 1;
+      final newVideos = await VideoService.getVideos(
+        limit: _pageSize,
+        offset: nextPage * _pageSize,
         category: _selectedCategory,
-        searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
+        searchQuery: _searchQuery.isNotEmpty ? _searchQuery : null,
+      );
+
+      if (mounted && newVideos.isNotEmpty) {
+        setState(() {
+          _videos.addAll(newVideos);
+          _currentPage = nextPage;
+        });
+      }
+    } catch (e) {
+      debugPrint('Erreur lors du chargement de plus de vidéos: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingMore = false;
+        });
+      }
+    }
+  }
+
+  void _onSearchChanged() {
+    final query = _searchController.text.trim();
+    if (query != _searchQuery) {
+      setState(() {
+        _searchQuery = query;
+      });
+      _performSearch();
+    }
+  }
+
+  Future<void> _performSearch() async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      final videos = await VideoService.getVideos(
+        limit: _pageSize,
+        offset: 0,
+        category: _selectedCategory,
+        searchQuery: _searchQuery.isNotEmpty ? _searchQuery : null,
       );
 
       if (mounted) {
         setState(() {
-          if (refresh) {
-            _videos = videos;
-          } else {
-            _videos.addAll(videos);
-          }
-          
-          _hasMoreVideos = videos.length == _videosPerPage;
-          _currentPage++;
+          _videos = videos;
+          _currentPage = 0;
+          _currentIndex = 0;
           _isLoading = false;
-          _isLoadingMore = false;
-          _hasError = false;
         });
+
+        if (_videos.isNotEmpty) {
+          _pageController.animateToPage(
+            0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+        }
       }
     } catch (e) {
-      if (kDebugMode) {
-        print('Erreur lors du chargement des vidéos: $e');
-      }
       if (mounted) {
         setState(() {
-          _hasError = true;
-          _errorMessage = e.toString();
           _isLoading = false;
-          _isLoadingMore = false;
         });
       }
     }
   }
 
-  Future<void> _performSearch(String query) async {
-    setState(() {
-      _searchQuery = query;
-    });
-    await _loadVideos(refresh: true);
-  }
-
-  Future<void> _selectCategory(String? category) async {
-    setState(() {
-      _selectedCategory = category;
-    });
-    await _loadVideos(refresh: true);
-  }
-
-  void _onPageChanged(int index) {
-    setState(() {
-      _currentVideoIndex = index;
-    });
-
-    // Précharger plus de vidéos si nécessaire
-    if (index >= _videos.length - 3 && !_isLoadingMore && _hasMoreVideos) {
-      _loadVideos();
+  void _onCategorySelected(String? category) {
+    if (category != _selectedCategory) {
+      setState(() {
+        _selectedCategory = category;
+      });
+      _performSearch();
     }
   }
 
-  Future<void> _refreshVideos() async {
-    HapticFeedback.lightImpact();
-    await _loadVideos(refresh: true);
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+      _selectedCategory = null;
+    });
+    _loadInitialData();
+  }
+
+  void _openRecipeDrawer(String recipeId) {
+    HapticFeedback.mediumImpact();
+    
+    // Mettre en pause la vidéo avant d'ouvrir le drawer
+    //_videoManager.pauseAll();
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => RecipeDrawer(
+        recipeId: recipeId,
+        onClose: () => Navigator.of(context).pop(),
+        onCartUpdated: () {
+          // Callback pour mise à jour du panier
+        },
+      ),
+    );
+  }
+
+  void _onVideoLike() {
+    // TODO: Implement like functionality
+  }
+
+  void _onVideoShare() {
+    // TODO: Implement share functionality
   }
 
   @override
@@ -207,9 +224,62 @@ class _VideosPageState extends State<VideosPage>
       body: SafeArea(
         child: Column(
           children: [
-            // Header avec recherche et filtres
-            _buildHeader(),
-            
+            // Header avec recherche
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.black,
+              child: Column(
+                children: [
+                  // Barre de recherche
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[900],
+                      borderRadius: BorderRadius.circular(25),
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Rechercher des vidéos...',
+                        hintStyle: TextStyle(color: Colors.grey[400]),
+                        prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: Icon(Icons.clear, color: Colors.grey[400]),
+                                onPressed: _clearSearch,
+                              )
+                            : null,
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 15,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Filtres par catégorie
+                  if (_categories.isNotEmpty)
+                    SizedBox(
+                      height: 40,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _categories.length + 1,
+                        itemBuilder: (context, index) {
+                          if (index == 0) {
+                            return _buildCategoryChip('Toutes', null);
+                          }
+                          final category = _categories[index - 1];
+                          return _buildCategoryChip(category, category);
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
             // Contenu principal
             Expanded(
               child: _buildContent(),
@@ -220,105 +290,30 @@ class _VideosPageState extends State<VideosPage>
     );
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        border: Border(
-          bottom: BorderSide(
-            color: Colors.grey[800]!,
-            width: 0.5,
-          ),
-        ),
-      ),
-      child: Column(
-        children: [
-          // Barre de recherche
-          Container(
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.grey[900],
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: TextField(
-              controller: _searchController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Rechercher des vidéos...',
-                hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: Colors.grey[400],
-                ),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        onPressed: () {
-                          _searchController.clear();
-                          _performSearch('');
-                        },
-                        icon: Icon(
-                          Icons.clear,
-                          color: Colors.grey[400],
-                        ),
-                      )
-                    : null,
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 12),
-          
-          // Filtres par catégorie
-          SizedBox(
-            height: 32,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _buildCategoryChip('Toutes', null),
-                const SizedBox(width: 8),
-                ..._categories.map((category) => Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: _buildCategoryChip(category, category),
-                )),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildCategoryChip(String label, String? value) {
     final isSelected = _selectedCategory == value;
-    
-    return GestureDetector(
-      onTap: () => _selectCategory(value),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary : Colors.grey[800],
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Text(
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      child: FilterChip(
+        label: Text(
           label,
           style: TextStyle(
-            color: isSelected ? Colors.white : Colors.grey[300],
-            fontSize: 14,
+            color: isSelected ? Colors.black : Colors.white,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
+        selected: isSelected,
+        onSelected: (_) => _onCategorySelected(value),
+        backgroundColor: Colors.grey[800],
+        selectedColor: AppColors.primary,
+        checkmarkColor: Colors.black,
+        side: BorderSide.none,
       ),
     );
   }
 
   Widget _buildContent() {
-    if (_isLoading) {
+    if (_isLoading && _videos.isEmpty) {
       return const Center(
         child: CircularProgressIndicator(
           color: AppColors.primary,
@@ -338,29 +333,17 @@ class _VideosPageState extends State<VideosPage>
             ),
             const SizedBox(height: 16),
             Text(
-              'Erreur de chargement',
+              'Erreur lors du chargement des vidéos',
               style: TextStyle(
-                color: Colors.grey[300],
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
+                color: Colors.grey[400],
+                fontSize: 16,
               ),
             ),
-            const SizedBox(height: 8),
-            if (_errorMessage != null)
-              Text(
-                _errorMessage!,
-                style: TextStyle(
-                  color: Colors.grey[500],
-                  fontSize: 14,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _loadInitialData,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
               ),
               child: const Text('Réessayer'),
             ),
@@ -381,33 +364,51 @@ class _VideosPageState extends State<VideosPage>
             ),
             const SizedBox(height: 16),
             Text(
-              'Aucune vidéo trouvée',
+              _searchQuery.isNotEmpty
+                  ? 'Aucune vidéo trouvée pour "$_searchQuery"'
+                  : 'Aucune vidéo disponible',
               style: TextStyle(
-                color: Colors.grey[300],
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
+                color: Colors.grey[400],
+                fontSize: 16,
               ),
+              textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Essayez de modifier vos critères de recherche',
-              style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 14,
+            if (_searchQuery.isNotEmpty || _selectedCategory != null) ...[
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _clearSearch,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                ),
+                child: const Text('Voir toutes les vidéos'),
               ),
-            ),
+            ],
           ],
         ),
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: _refreshVideos,
-      color: AppColors.primary,
+    return NotificationListener<ScrollNotification>(
+      onNotification: (ScrollNotification scrollInfo) {
+        if (scrollInfo is ScrollEndNotification &&
+            scrollInfo.metrics.extentAfter < 200) {
+          _loadMoreVideos();
+        }
+        return false;
+      },
       child: PageView.builder(
         controller: _pageController,
         scrollDirection: Axis.vertical,
-        onPageChanged: _onPageChanged,
+        onPageChanged: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+
+          // Charger plus de vidéos si on approche de la fin
+          if (index >= _videos.length - 2) {
+            _loadMoreVideos();
+          }
+        },
         itemCount: _videos.length + (_isLoadingMore ? 1 : 0),
         itemBuilder: (context, index) {
           if (index >= _videos.length) {
@@ -419,32 +420,19 @@ class _VideosPageState extends State<VideosPage>
           }
 
           final video = _videos[index];
-          final isActive = index == _currentVideoIndex;
+          final isVisible = index == _currentIndex;
 
           return SimpleVideoPlayer(
             key: ValueKey(video['id']),
             video: video,
-            isActive: isActive,
-            onLike: () {
-              // Le like est géré dans SimpleVideoPlayer
-            },
-            onShare: () {
-              _shareVideo(video);
-            },
+            isActive: index == _currentIndex && !_showRecipeDrawer,
+            onRecipePressed: video['recipe_id'] != null
+                ? () => _openRecipeDrawer(video['recipe_id'])
+                : null,
+            onLike: _onVideoLike,
+            onShare: _onVideoShare,
           );
         },
-      ),
-    );
-  }
-
-  void _shareVideo(Map<String, dynamic> video) {
-    HapticFeedback.lightImpact();
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Partage de "${video['title']}" bientôt disponible !'),
-        backgroundColor: AppColors.primary,
-        duration: const Duration(seconds: 2),
       ),
     );
   }
