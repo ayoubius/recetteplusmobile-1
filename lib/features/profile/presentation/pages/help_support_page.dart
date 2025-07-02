@@ -77,7 +77,7 @@ class HelpSupportPage extends StatelessWidget {
             'Utilisez la barre de recherche dans l\'onglet Recettes ou filtrez par catégorie.',
       },
       {
-        'question': 'Mes donn��es sont-elles sécurisées ?',
+        'question': 'Mes données sont-elles sécurisées ?',
         'answer':
             'Oui, nous utilisons Firebase pour sécuriser vos données avec un chiffrement de niveau entreprise.',
       },
@@ -125,7 +125,7 @@ class HelpSupportPage extends StatelessWidget {
                 ],
               ),
               if (index < faqs.length - 1)
-                Divider(
+                const Divider(
                   height: 1,
                   color: AppColors.border,
                   indent: 16,
@@ -331,7 +331,7 @@ class HelpSupportPage extends StatelessWidget {
   }
 
   Widget _buildDivider() {
-    return Divider(
+    return const Divider(
       height: 1,
       color: AppColors.border,
       indent: 70,

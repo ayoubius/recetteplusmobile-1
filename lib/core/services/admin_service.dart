@@ -1,6 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
-import '../../supabase_options.dart';
 
 class AdminService {
   static final SupabaseClient _client = Supabase.instance.client;

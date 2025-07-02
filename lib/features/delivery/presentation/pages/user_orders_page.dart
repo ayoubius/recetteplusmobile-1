@@ -107,8 +107,8 @@ class _UserOrdersPageState extends State<UserOrdersPage> with TickerProviderStat
               icon: const Icon(Icons.delivery_dining),
               text: 'En cours (${_activeDeliveries.length})',
             ),
-            Tab(
-              icon: const Icon(Icons.history),
+            const Tab(
+              icon: Icon(Icons.history),
               text: 'Historique',
             ),
           ],
@@ -437,7 +437,7 @@ class _UserOrdersPageState extends State<UserOrdersPage> with TickerProviderStat
                         const SizedBox(width: 8),
                         Text(
                           'Livraison estimée: ${app_date_utils.AppDateUtils.formatDateTime(orderObj.estimatedDeliveryTime!)}',
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: AppColors.primary,

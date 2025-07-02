@@ -32,7 +32,7 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
   bool _isGettingLocation = false;
 
   // État d'expansion des paniers
-  Set<String> _expandedCarts = {};
+  final Set<String> _expandedCarts = {};
 
   @override
   void initState() {
@@ -339,7 +339,7 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
+            const SnackBar(
               content: Text(
                   "Impossible d'obtenir la position. Activez le GPS ou saisissez l'adresse manuellement."),
               backgroundColor: Colors.red,
@@ -1099,7 +1099,7 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
                 const SizedBox(height: 4),
                 Text(
                   CurrencyUtils.formatPrice(productPrice),
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: AppColors.primary,

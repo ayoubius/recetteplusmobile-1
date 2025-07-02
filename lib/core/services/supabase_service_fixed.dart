@@ -1,6 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
-import 'dart:typed_data';
 import '../../supabase_options.dart';
 
 class SupabaseService {

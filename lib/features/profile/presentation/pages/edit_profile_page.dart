@@ -358,7 +358,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                           ),
                           child: Row(
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.error_outline,
                                 color: AppColors.error,
                                 size: 20,
@@ -367,7 +367,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                               Expanded(
                                 child: Text(
                                   _errorMessage!,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     color: AppColors.error,
                                     fontSize: 14,
                                   ),
@@ -435,7 +435,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(
+                      const Text(
                         'L\'adresse e-mail ne peut pas être modifiée',
                         style: TextStyle(
                           fontSize: 12,

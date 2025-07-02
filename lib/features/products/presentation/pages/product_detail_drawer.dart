@@ -208,7 +208,7 @@ class _ProductDetailDrawerState extends State<ProductDetailDrawer>
                                         widget.product['image'],
                                         fit: BoxFit.cover,
                                         errorBuilder: (context, error, stackTrace) {
-                                          return Icon(
+                                          return const Icon(
                                             Icons.inventory_2_outlined,
                                             size: 80,
                                             color: AppColors.primary,
@@ -216,7 +216,7 @@ class _ProductDetailDrawerState extends State<ProductDetailDrawer>
                                         },
                                       ),
                                     )
-                                  : Icon(
+                                  : const Icon(
                                       Icons.inventory_2_outlined,
                                       size: 80,
                                       color: AppColors.primary,

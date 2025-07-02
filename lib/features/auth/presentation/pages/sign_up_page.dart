@@ -194,7 +194,7 @@ class _SignUpPageState extends State<SignUpPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // En-tête
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
@@ -205,7 +205,7 @@ class _SignUpPageState extends State<SignUpPage> {
                         color: AppColors.textPrimary,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                     Text(
                       'Rejoignez-nous pour découvrir l\'univers des saveurs',
                       style: TextStyle(
@@ -231,7 +231,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     child: Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.error_outline,
                           color: AppColors.error,
                           size: 20,
@@ -240,7 +240,7 @@ class _SignUpPageState extends State<SignUpPage> {
                         Expanded(
                           child: Text(
                             _errorMessage!,
-                            style: TextStyle(
+                            style: const TextStyle(
                               color: AppColors.error,
                               fontSize: 14,
                             ),
@@ -262,11 +262,11 @@ class _SignUpPageState extends State<SignUpPage> {
                 const SizedBox(height: 24),
 
                 // Séparateur
-                Row(
+                const Row(
                   children: [
-                    const Expanded(child: Divider(color: AppColors.border)),
+                    Expanded(child: Divider(color: AppColors.border)),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: EdgeInsets.symmetric(horizontal: 16),
                       child: Text(
                         'ou',
                         style: TextStyle(
@@ -275,7 +275,7 @@ class _SignUpPageState extends State<SignUpPage> {
                         ),
                       ),
                     ),
-                    const Expanded(child: Divider(color: AppColors.border)),
+                    Expanded(child: Divider(color: AppColors.border)),
                   ],
                 ),
                 const SizedBox(height: 24),
@@ -355,7 +355,7 @@ class _SignUpPageState extends State<SignUpPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
+                    const Text(
                       'Vous avez déjà un compte ?',
                       style: TextStyle(
                         color: AppColors.textSecondary,
@@ -371,7 +371,7 @@ class _SignUpPageState extends State<SignUpPage> {
                           ),
                         );
                       },
-                      child: Text(
+                      child: const Text(
                         'Se connecter',
                         style: TextStyle(
                           color: AppColors.primary,

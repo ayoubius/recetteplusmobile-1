@@ -15,18 +15,18 @@ class DatabaseInspector {
       final columnCount = sample.isNotEmpty ? sample.first.keys.length : 0;
       final columns = sample.isNotEmpty ? sample.first.keys.toList() : <String>[];
 
-      // Compter le nombre total d'enregistrements
-      final countResult = await _client
+      // Compter le nombre total d'enregistrements (attention: inefficace pour grandes tables)
+      final allRows = await _client
           .from(tableName)
-          .select('*', const FetchOptions(count: CountOption.exact))
-          .limit(1);
+          .select('*');
+      final recordCount = allRows.length;
 
       return TableInfo(
         name: tableName,
         exists: true,
         columnCount: columnCount,
         columns: columns,
-        recordCount: countResult.count ?? 0,
+        recordCount: recordCount,
       );
     } catch (e) {
       return TableInfo(

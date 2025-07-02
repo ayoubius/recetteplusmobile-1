@@ -88,7 +88,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
           icon: const Icon(Icons.arrow_back_ios, color: AppColors.textPrimary),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(
+        title: const Text(
           'Mot de passe oublié',
           style: TextStyle(
             color: AppColors.textPrimary,
@@ -117,7 +117,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       color: AppColors.primary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(40),
                     ),
-                    child: Icon(
+                    child: const Icon(
                       Icons.lock_reset,
                       size: 40,
                       color: AppColors.primary,
@@ -127,7 +127,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 const SizedBox(height: 32),
 
                 // En-tête
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
@@ -138,7 +138,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         color: AppColors.textPrimary,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                     Text(
                       'Entrez votre adresse e-mail et nous vous enverrons un lien pour réinitialiser votre mot de passe.',
                       style: TextStyle(
@@ -165,7 +165,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                     ),
                     child: Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.error_outline,
                           color: AppColors.error,
                           size: 20,
@@ -174,7 +174,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         Expanded(
                           child: Text(
                             _errorMessage!,
-                            style: TextStyle(
+                            style: const TextStyle(
                               color: AppColors.error,
                               fontSize: 14,
                             ),
@@ -198,7 +198,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                     ),
                     child: Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.check_circle_outline,
                           color: Colors.green,
                           size: 20,
@@ -244,7 +244,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 Center(
                   child: TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: Text(
+                    child: const Text(
                       'Retour à la connexion',
                       style: TextStyle(
                         color: AppColors.primary,

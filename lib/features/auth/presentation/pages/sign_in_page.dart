@@ -184,7 +184,7 @@ class _SignInPageState extends State<SignInPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // En-tête
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
@@ -195,7 +195,7 @@ class _SignInPageState extends State<SignInPage> {
                         color: AppColors.textPrimary,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                     Text(
                       'Connectez-vous pour accéder à vos recettes favorites',
                       style: TextStyle(
@@ -221,7 +221,7 @@ class _SignInPageState extends State<SignInPage> {
                     ),
                     child: Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.error_outline,
                           color: AppColors.error,
                           size: 20,
@@ -230,7 +230,7 @@ class _SignInPageState extends State<SignInPage> {
                         Expanded(
                           child: Text(
                             _errorMessage!,
-                            style: TextStyle(
+                            style: const TextStyle(
                               color: AppColors.error,
                               fontSize: 14,
                             ),
@@ -252,11 +252,11 @@ class _SignInPageState extends State<SignInPage> {
                 const SizedBox(height: 24),
 
                 // Séparateur
-                Row(
+                const Row(
                   children: [
-                    const Expanded(child: Divider(color: AppColors.border)),
+                    Expanded(child: Divider(color: AppColors.border)),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: EdgeInsets.symmetric(horizontal: 16),
                       child: Text(
                         AppStrings.or,
                         style: TextStyle(
@@ -265,7 +265,7 @@ class _SignInPageState extends State<SignInPage> {
                         ),
                       ),
                     ),
-                    const Expanded(child: Divider(color: AppColors.border)),
+                    Expanded(child: Divider(color: AppColors.border)),
                   ],
                 ),
                 const SizedBox(height: 24),
@@ -307,7 +307,7 @@ class _SignInPageState extends State<SignInPage> {
                         ),
                       );
                     },
-                    child: Text(
+                    child: const Text(
                       AppStrings.forgotPassword,
                       style: TextStyle(
                         color: AppColors.primary,
@@ -330,7 +330,7 @@ class _SignInPageState extends State<SignInPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
+                    const Text(
                       AppStrings.dontHaveAccount,
                       style: TextStyle(
                         color: AppColors.textSecondary,
@@ -346,7 +346,7 @@ class _SignInPageState extends State<SignInPage> {
                           ),
                         );
                       },
-                      child: Text(
+                      child: const Text(
                         AppStrings.signUp,
                         style: TextStyle(
                           color: AppColors.primary,

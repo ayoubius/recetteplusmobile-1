@@ -97,7 +97,7 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
           // Mettre à jour les coordonnées du livreur si disponibles
           if (tracking?.currentLatitude != null && tracking?.currentLongitude != null) {
             _deliveryLatitude = tracking!.currentLatitude;
-            _deliveryLongitude = tracking!.currentLongitude;
+            _deliveryLongitude = tracking.currentLongitude;
           }
           
           _isLoading = false;
@@ -344,7 +344,7 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.error_outline,
             size: 80,
             color: AppColors.error,
@@ -540,7 +540,7 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
                 const SizedBox(width: 8),
                 Text(
                   app_date_utils.AppDateUtils.formatDateTime(_order!.estimatedDeliveryTime!),
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: AppColors.primary,
@@ -663,7 +663,7 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
           
           // Liste des articles
           if (items.isNotEmpty) ...[
-            ...items.map((item) => _buildOrderItem(item, isDark)).toList(),
+            ...items.map((item) => _buildOrderItem(item, isDark)),
             const Divider(height: 32),
           ] else
             Text(

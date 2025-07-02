@@ -39,10 +39,10 @@ class AppDateUtils {
 
     if (difference.inDays > 365) {
       final years = (difference.inDays / 365).floor();
-      return 'il y a ${years} an${years > 1 ? 's' : ''}';
+      return 'il y a $years an${years > 1 ? 's' : ''}';
     } else if (difference.inDays > 30) {
       final months = (difference.inDays / 30).floor();
-      return 'il y a ${months} mois';
+      return 'il y a $months mois';
     } else if (difference.inDays > 0) {
       return 'il y a ${difference.inDays} jour${difference.inDays > 1 ? 's' : ''}';
     } else if (difference.inHours > 0) {
@@ -93,7 +93,7 @@ class AppDateUtils {
   /// Formater une durée en minutes/heures
   static String formatDuration(int minutes) {
     if (minutes < 60) {
-      return '${minutes} min';
+      return '$minutes min';
     } else {
       final hours = minutes ~/ 60;
       final remainingMinutes = minutes % 60;
