@@ -33,11 +33,14 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   bool _isInitialized = false;
   bool _isLoading = false;
   bool _hasError = false;
-  bool _showControls = false;
+  bool _showProgressBar = false;
   String? _errorMessage;
   
-  Timer? _hideControlsTimer;
-  Timer? _initTimer;
+  Timer? _hideProgressTimer;
+  Timer? _progressUpdateTimer;
+  double _currentProgress = 0.0;
+  Duration _currentPosition = Duration.zero;
+  Duration _totalDuration = Duration.zero;
 
   @override
   bool get wantKeepAlive => true;
@@ -61,6 +64,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
         _initializeVideo();
       } else {
         _pauseVideo();
+        _stopProgressUpdates();
       }
     }
   }
@@ -89,7 +93,11 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
         setState(() {
           _isInitialized = true;
           _isLoading = false;
+          _totalDuration = controller.value.duration;
         });
+
+        // Écouter les changements de position
+        controller.addListener(_onVideoPositionChanged);
 
         // Démarrer la lecture si la vidéo est active
         if (widget.isActive) {
@@ -113,9 +121,26 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     }
   }
 
+  void _onVideoPositionChanged() {
+    final controller = _videoManager.getController(_videoId);
+    if (controller != null && mounted) {
+      final position = controller.value.position;
+      final duration = controller.value.duration;
+      
+      setState(() {
+        _currentPosition = position;
+        _totalDuration = duration;
+        if (duration.inMilliseconds > 0) {
+          _currentProgress = position.inMilliseconds / duration.inMilliseconds;
+        }
+      });
+    }
+  }
+
   Future<void> _playVideo() async {
     if (_isInitialized) {
       await _videoManager.playVideo(_videoId);
+      _startProgressUpdates();
       setState(() {});
     }
   }
@@ -123,8 +148,24 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   Future<void> _pauseVideo() async {
     if (_isInitialized) {
       await _videoManager.pauseVideo(_videoId);
+      _stopProgressUpdates();
       setState(() {});
     }
+  }
+
+  void _startProgressUpdates() {
+    _progressUpdateTimer?.cancel();
+    _progressUpdateTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (!mounted || !_videoManager.isPlaying(_videoId)) {
+        timer.cancel();
+        return;
+      }
+      _onVideoPositionChanged();
+    });
+  }
+
+  void _stopProgressUpdates() {
+    _progressUpdateTimer?.cancel();
   }
 
   void _togglePlayPause() {
@@ -136,34 +177,42 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
       _playVideo();
     }
     
-    _showControlsTemporarily();
+    _showProgressBarTemporarily();
   }
 
-  void _showControlsTemporarily() {
+  void _showProgressBarTemporarily() {
     setState(() {
-      _showControls = true;
+      _showProgressBar = true;
     });
 
-    _hideControlsTimer?.cancel();
-    _hideControlsTimer = Timer(const Duration(seconds: 3), () {
+    _hideProgressTimer?.cancel();
+    _hideProgressTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) {
         setState(() {
-          _showControls = false;
+          _showProgressBar = false;
         });
       }
     });
   }
 
+  void _onProgressBarTap(double value) {
+    final controller = _videoManager.getController(_videoId);
+    if (controller != null && _totalDuration.inMilliseconds > 0) {
+      final newPosition = Duration(
+        milliseconds: (value * _totalDuration.inMilliseconds).round(),
+      );
+      controller.seekTo(newPosition);
+      _showProgressBarTemporarily();
+    }
+  }
+
   void _onDoubleTap() {
     HapticFeedback.mediumImpact();
     widget.onLike?.call();
-    
-    // Animation de like
     _showLikeAnimation();
   }
 
   void _showLikeAnimation() {
-    // Simple feedback visuel
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Row(
@@ -191,8 +240,13 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
 
   @override
   void dispose() {
-    _hideControlsTimer?.cancel();
-    _initTimer?.cancel();
+    _hideProgressTimer?.cancel();
+    _progressUpdateTimer?.cancel();
+    
+    // Retirer le listener du contrôleur
+    final controller = _videoManager.getController(_videoId);
+    controller?.removeListener(_onVideoPositionChanged);
+    
     super.dispose();
   }
 
@@ -216,20 +270,14 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
           else
             _buildThumbnailState(),
           
-          // Overlay tactile
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: _togglePlayPause,
-              onDoubleTap: _onDoubleTap,
-              child: Container(color: Colors.transparent),
-            ),
-          ),
+          // Zone tactile pour play/pause (exclut les boutons d'action)
+          _buildTouchArea(),
           
-          // Contrôles de lecture
-          if (_showControls && _isInitialized)
-            _buildPlaybackControls(),
+          // Barre de progression
+          if (_showProgressBar || !_videoManager.isPlaying(_videoId))
+            _buildProgressBar(),
           
-          // Interface utilisateur
+          // Interface utilisateur (boutons d'action)
           _buildUserInterface(),
         ],
       ),
@@ -380,24 +428,27 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
 
         // Bouton play central
         Center(
-          child: Container(
-            width: 70,
-            height: 70,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.9),
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: const Icon(
-              Icons.play_arrow,
-              color: Colors.white,
-              size: 32,
+          child: GestureDetector(
+            onTap: _togglePlayPause,
+            child: Container(
+              width: 70,
+              height: 70,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.9),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.play_arrow,
+                color: Colors.white,
+                size: 32,
+              ),
             ),
           ),
         ),
@@ -405,60 +456,152 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     );
   }
 
-  Widget _buildPlaybackControls() {
-    final controller = _videoManager.getController(_videoId);
-    if (controller == null) return const SizedBox.shrink();
+  Widget _buildTouchArea() {
+    return Positioned.fill(
+      child: Row(
+        children: [
+          // Zone gauche (70% de l'écran) - pour play/pause
+          Expanded(
+            flex: 7,
+            child: GestureDetector(
+              onTap: _isInitialized ? _togglePlayPause : null,
+              onDoubleTap: _onDoubleTap,
+              child: Container(
+                color: Colors.transparent,
+                child: _buildPlayPauseIndicator(),
+              ),
+            ),
+          ),
+          // Zone droite (30% de l'écran) - réservée aux boutons d'action
+          Expanded(
+            flex: 3,
+            child: Container(color: Colors.transparent),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlayPauseIndicator() {
+    if (!_isInitialized) return const SizedBox.shrink();
 
     final isPlaying = _videoManager.isPlaying(_videoId);
+    
+    return AnimatedOpacity(
+      opacity: _showProgressBar ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 200),
+      child: Center(
+        child: Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.7),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            isPlaying ? Icons.pause : Icons.play_arrow,
+            color: Colors.white,
+            size: 30,
+          ),
+        ),
+      ),
+    );
+  }
 
-    return Positioned.fill(
+  Widget _buildProgressBar() {
+    if (!_isInitialized) return const SizedBox.shrink();
+
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
       child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
             colors: [
-              Colors.black.withOpacity(0.3),
+              Colors.black.withOpacity(0.8),
+              Colors.black.withOpacity(0.4),
               Colors.transparent,
-              Colors.black.withOpacity(0.5),
             ],
           ),
         ),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Bouton play/pause principal
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                onPressed: _togglePlayPause,
-                icon: Icon(
-                  isPlaying ? Icons.pause : Icons.play_arrow,
-                  color: Colors.white,
-                  size: 28,
+            // Barre de progression interactive
+            GestureDetector(
+              onTapDown: (details) {
+                final RenderBox box = context.findRenderObject() as RenderBox;
+                final localPosition = box.globalToLocal(details.globalPosition);
+                final progress = (localPosition.dx - 16) / (box.size.width - 32);
+                final clampedProgress = progress.clamp(0.0, 1.0);
+                _onProgressBarTap(clampedProgress);
+              },
+              child: Container(
+                height: 40,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                child: Stack(
+                  children: [
+                    // Barre de fond
+                    Container(
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    // Barre de progression
+                    FractionallySizedBox(
+                      widthFactor: _currentProgress,
+                      child: Container(
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    // Indicateur de position
+                    Positioned(
+                      left: (_currentProgress * (MediaQuery.of(context).size.width - 32)) - 6,
+                      top: 9,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            
-            const Spacer(),
-            
-            // Barre de progression
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-              child: VideoProgressIndicator(
-                controller,
-                allowScrubbing: true,
-                colors: const VideoProgressColors(
-                  playedColor: AppColors.primary,
-                  bufferedColor: Colors.white30,
-                  backgroundColor: Colors.white12,
+            // Temps
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _formatDuration(_currentPosition),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
+                Text(
+                  _formatDuration(_totalDuration),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -564,11 +707,13 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                               ),
                           ],
                         ),
+                        // Espace pour la barre de progression
+                        const SizedBox(height: 80),
                       ],
                     ),
                   ),
                   const SizedBox(width: 16),
-                  // Actions
+                  // Actions (zone protégée des taps)
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -592,6 +737,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                           isHighlighted: true,
                         ),
                       ],
+                      const SizedBox(height: 80), // Espace pour la barre de progression
                     ],
                   ),
                 ],

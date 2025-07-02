@@ -15,7 +15,7 @@ class VideosPage extends StatefulWidget {
 }
 
 class _VideosPageState extends State<VideosPage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, RouteAware {
   final PageController _pageController = PageController();
   final TextEditingController _searchController = TextEditingController();
   final SimpleVideoManager _videoManager = SimpleVideoManager();
@@ -73,14 +73,31 @@ class _VideosPageState extends State<VideosPage>
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
+        // Mettre en pause toutes les vidéos quand l'app passe en arrière-plan
         _videoManager.pauseAll();
         break;
       case AppLifecycleState.resumed:
-        // La vidéo reprendra automatiquement quand elle sera active
+        // Ne pas reprendre automatiquement, laisser l'utilisateur décider
         break;
       default:
         break;
     }
+  }
+
+  // Méthode appelée quand on quitte la page des vidéos
+  void _onPageExit() {
+    _videoManager.pauseAll();
+    if (kDebugMode) {
+      print('🚪 Sortie de la page vidéos - Pause automatique');
+    }
+  }
+
+  // Méthode appelée quand on revient sur la page des vidéos
+  void _onPageEnter() {
+    if (kDebugMode) {
+      print('🚪 Entrée sur la page vidéos');
+    }
+    // Ne pas reprendre automatiquement la lecture
   }
 
   Future<void> _loadVideos() async {
@@ -166,6 +183,9 @@ class _VideosPageState extends State<VideosPage>
   }
 
   void _filterByCategory(String category) {
+    // Mettre en pause avant de changer de catégorie
+    _videoManager.pauseAll();
+    
     setState(() {
       _selectedCategory = category;
       _filteredVideos = _filterVideosByCategory(_videos, category);
@@ -220,11 +240,14 @@ class _VideosPageState extends State<VideosPage>
 
   void _openRecipeDrawer(String recipeId) {
     HapticFeedback.mediumImpact();
+    
+    // Mettre en pause la vidéo avant d'ouvrir le drawer
+    _videoManager.pauseAll();
+    
     setState(() {
       _currentRecipeId = recipeId;
       _showRecipeDrawer = true;
     });
-    _videoManager.pauseAll();
   }
 
   void _closeRecipeDrawer() {
@@ -232,6 +255,7 @@ class _VideosPageState extends State<VideosPage>
       _showRecipeDrawer = false;
       _currentRecipeId = null;
     });
+    // Ne pas reprendre automatiquement la lecture
   }
 
   void _onVideoLike() {
@@ -257,20 +281,27 @@ class _VideosPageState extends State<VideosPage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          _buildMainContent(),
-          if (_showSearchModal) _buildSearchOverlay(),
-          if (_showRecipeDrawer && _currentRecipeId != null)
-            Positioned.fill(
-              child: RecipeDrawer(
-                recipeId: _currentRecipeId!,
-                onClose: _closeRecipeDrawer,
+    return WillPopScope(
+      onWillPop: () async {
+        // Mettre en pause quand on quitte la page
+        _onPageExit();
+        return true;
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            _buildMainContent(),
+            if (_showSearchModal) _buildSearchOverlay(),
+            if (_showRecipeDrawer && _currentRecipeId != null)
+              Positioned.fill(
+                child: RecipeDrawer(
+                  recipeId: _currentRecipeId!,
+                  onClose: _closeRecipeDrawer,
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -442,6 +473,8 @@ class _VideosPageState extends State<VideosPage>
               ),
               child: IconButton(
                 onPressed: () {
+                  // Mettre en pause avant d'ouvrir la recherche
+                  _videoManager.pauseAll();
                   setState(() {
                     _showSearchModal = true;
                   });

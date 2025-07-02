@@ -12,6 +12,18 @@ class SimpleVideoManager {
   final Set<String> _isLoading = {};
   String? _currentPlayingId;
 
+  // Callbacks pour les changements d'état
+  final List<VoidCallback> _onPauseCallbacks = [];
+
+  // Ajouter un callback pour les pauses automatiques
+  void addOnPauseCallback(VoidCallback callback) {
+    _onPauseCallbacks.add(callback);
+  }
+
+  void removeOnPauseCallback(VoidCallback callback) {
+    _onPauseCallbacks.remove(callback);
+  }
+
   // Initialiser une vidéo
   Future<VideoPlayerController?> initializeVideo(String videoId, String videoUrl) async {
     if (_controllers.containsKey(videoId)) {
@@ -85,7 +97,7 @@ class SimpleVideoManager {
     }
   }
 
-  // Arrêter toutes les vidéos
+  // Arrêter toutes les vidéos (appelé lors des changements de page)
   Future<void> pauseAll() async {
     for (final entry in _controllers.entries) {
       if (_isInitialized[entry.key] == true) {
@@ -93,6 +105,15 @@ class SimpleVideoManager {
       }
     }
     _currentPlayingId = null;
+    
+    // Notifier les callbacks
+    for (final callback in _onPauseCallbacks) {
+      callback();
+    }
+    
+    if (kDebugMode) {
+      print('⏸️ Toutes les vidéos mises en pause');
+    }
   }
 
   // Obtenir un contrôleur
@@ -115,6 +136,9 @@ class SimpleVideoManager {
     final controller = _controllers[videoId];
     return controller?.value.isPlaying == true;
   }
+
+  // Obtenir la vidéo actuellement en lecture
+  String? get currentPlayingId => _currentPlayingId;
 
   // Nettoyer une vidéo
   void disposeVideo(String videoId) {
@@ -144,6 +168,7 @@ class SimpleVideoManager {
     _isInitialized.clear();
     _isLoading.clear();
     _currentPlayingId = null;
+    _onPauseCallbacks.clear();
     
     if (kDebugMode) {
       print('🗑️ Toutes les vidéos supprimées');
@@ -160,5 +185,17 @@ class SimpleVideoManager {
   Duration getDuration(String videoId) {
     final controller = _controllers[videoId];
     return controller?.value.duration ?? Duration.zero;
+  }
+
+  // Chercher à une position spécifique
+  Future<void> seekTo(String videoId, Duration position) async {
+    final controller = _controllers[videoId];
+    if (controller != null && _isInitialized[videoId] == true) {
+      await controller.seekTo(position);
+      
+      if (kDebugMode) {
+        print('⏭️ Seek $videoId à ${position.inSeconds}s');
+      }
+    }
   }
 }
