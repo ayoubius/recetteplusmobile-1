@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:async';
 import '../../../../core/services/simple_video_manager.dart';
+import '../../../../core/services/video_service.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../widgets/recipe_drawer.dart';
 
 class SimpleVideoPlayer extends StatefulWidget {
   final Map<String, dynamic> video;
@@ -34,6 +36,9 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   bool _isLoading = false;
   bool _hasError = false;
   bool _showProgressBar = false;
+  bool _isLiked = false;
+  bool _isLiking = false;
+  int _likesCount = 0;
   String? _errorMessage;
   
   Timer? _hideProgressTimer;
@@ -49,6 +54,9 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   void initState() {
     super.initState();
     _videoId = widget.video['id']?.toString() ?? 'unknown_${DateTime.now().millisecondsSinceEpoch}';
+    _likesCount = widget.video['likes'] ?? 0;
+    
+    _checkIfLiked();
     
     if (widget.isActive) {
       _initializeVideo();
@@ -67,6 +75,103 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
         _stopProgressUpdates();
       }
     }
+  }
+
+  Future<void> _checkIfLiked() async {
+    try {
+      final isLiked = await VideoService.isVideoLiked(_videoId);
+      if (mounted) {
+        setState(() {
+          _isLiked = isLiked;
+        });
+      }
+    } catch (e) {
+      // Ignore error for like status
+    }
+  }
+
+  Future<void> _toggleLike() async {
+    if (_isLiking) return;
+
+    setState(() {
+      _isLiking = true;
+    });
+
+    try {
+      HapticFeedback.mediumImpact();
+      
+      if (_isLiked) {
+        // Unlike
+        final success = await VideoService.unlikeVideo(_videoId);
+        if (success && mounted) {
+          setState(() {
+            _isLiked = false;
+            _likesCount = (_likesCount - 1).clamp(0, double.infinity).toInt();
+          });
+          _showFeedback('Like retiré', Icons.heart_broken, Colors.grey);
+        }
+      } else {
+        // Like
+        final success = await VideoService.likeVideo(_videoId);
+        if (success && mounted) {
+          setState(() {
+            _isLiked = true;
+            _likesCount += 1;
+          });
+          _showLikeAnimation();
+          _showFeedback('Vidéo likée !', Icons.favorite, Colors.red);
+        }
+      }
+    } catch (e) {
+      _showFeedback('Erreur: ${e.toString()}', Icons.error, Colors.red);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLiking = false;
+        });
+      }
+    }
+  }
+
+  void _showFeedback(String message, IconData icon, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 16),
+            const SizedBox(width: 8),
+            Text(message),
+          ],
+        ),
+        duration: const Duration(seconds: 1),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+      ),
+    );
+  }
+
+  void _showRecipeDrawer() {
+    final recipeId = widget.video['recipe_id']?.toString();
+    if (recipeId == null) {
+      _showFeedback('Aucune recette associée', Icons.info, AppColors.primary);
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => RecipeDrawer(
+        recipeId: recipeId,
+        onClose: () => Navigator.of(context).pop(),
+        onCartUpdated: () {
+          // Callback pour mise à jour du panier
+        },
+      ),
+    );
   }
 
   Future<void> _initializeVideo() async {
@@ -96,10 +201,8 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
           _totalDuration = controller.value.duration;
         });
 
-        // Écouter les changements de position
         controller.addListener(_onVideoPositionChanged);
 
-        // Démarrer la lecture si la vidéo est active
         if (widget.isActive) {
           _playVideo();
         }
@@ -207,29 +310,45 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   }
 
   void _onDoubleTap() {
-    HapticFeedback.mediumImpact();
-    widget.onLike?.call();
-    _showLikeAnimation();
+    _toggleLike();
   }
 
   void _showLikeAnimation() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.favorite, color: Colors.white, size: 16),
-            SizedBox(width: 8),
-            Text('Vidéo likée !'),
-          ],
+    // Animation de coeurs qui montent
+    final overlay = Overlay.of(context);
+    late OverlayEntry overlayEntry;
+    
+    overlayEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        left: MediaQuery.of(context).size.width / 2 - 25,
+        top: MediaQuery.of(context).size.height / 2 - 25,
+        child: IgnorePointer(
+          child: TweenAnimationBuilder<double>(
+            duration: const Duration(milliseconds: 1000),
+            tween: Tween(begin: 0.0, end: 1.0),
+            onEnd: () => overlayEntry.remove(),
+            builder: (context, value, child) {
+              return Transform.translate(
+                offset: Offset(0, -50 * value),
+                child: Opacity(
+                  opacity: 1.0 - value,
+                  child: Transform.scale(
+                    scale: 1.0 + (value * 0.5),
+                    child: const Icon(
+                      Icons.favorite,
+                      color: Colors.red,
+                      size: 50,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
         ),
-        duration: const Duration(seconds: 1),
-        backgroundColor: AppColors.primary,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        margin: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
       ),
     );
+    
+    overlay.insert(overlayEntry);
   }
 
   String _formatDuration(Duration duration) {
@@ -243,7 +362,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     _hideProgressTimer?.cancel();
     _progressUpdateTimer?.cancel();
     
-    // Retirer le listener du contrôleur
     final controller = _videoManager.getController(_videoId);
     controller?.removeListener(_onVideoPositionChanged);
     
@@ -260,7 +378,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
       color: Colors.black,
       child: Stack(
         children: [
-          // Lecteur vidéo ou états
           if (_hasError)
             _buildErrorState()
           else if (_isLoading)
@@ -270,14 +387,11 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
           else
             _buildThumbnailState(),
           
-          // Zone tactile pour play/pause (exclut les boutons d'action)
           _buildTouchArea(),
           
-          // Barre de progression
           if (_showProgressBar || !_videoManager.isPlaying(_videoId))
             _buildProgressBar(),
           
-          // Interface utilisateur (boutons d'action)
           _buildUserInterface(),
         ],
       ),
@@ -380,7 +494,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
   Widget _buildThumbnailState() {
     return Stack(
       children: [
-        // Image de fond
         if (widget.video['thumbnail'] != null)
           Positioned.fill(
             child: Image.network(
@@ -410,7 +523,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
             ),
           ),
 
-        // Overlay sombre
         Positioned.fill(
           child: Container(
             decoration: BoxDecoration(
@@ -426,7 +538,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
           ),
         ),
 
-        // Bouton play central
         Center(
           child: GestureDetector(
             onTap: _togglePlayPause,
@@ -460,7 +571,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     return Positioned.fill(
       child: Row(
         children: [
-          // Zone gauche (70% de l'écran) - pour play/pause
           Expanded(
             flex: 7,
             child: GestureDetector(
@@ -472,7 +582,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
               ),
             ),
           ),
-          // Zone droite (30% de l'écran) - réservée aux boutons d'action
           Expanded(
             flex: 3,
             child: Container(color: Colors.transparent),
@@ -531,7 +640,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Barre de progression interactive
             GestureDetector(
               onTapDown: (details) {
                 final RenderBox box = context.findRenderObject() as RenderBox;
@@ -545,7 +653,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                 padding: const EdgeInsets.symmetric(vertical: 15),
                 child: Stack(
                   children: [
-                    // Barre de fond
                     Container(
                       height: 4,
                       decoration: BoxDecoration(
@@ -553,7 +660,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                    // Barre de progression
                     FractionallySizedBox(
                       widthFactor: _currentProgress,
                       child: Container(
@@ -564,7 +670,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                         ),
                       ),
                     ),
-                    // Indicateur de position
                     Positioned(
                       left: (_currentProgress * (MediaQuery.of(context).size.width - 32)) - 6,
                       top: 9,
@@ -582,7 +687,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                 ),
               ),
             ),
-            // Temps
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -620,7 +724,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Informations vidéo
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -662,7 +765,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                             overflow: TextOverflow.ellipsis,
                           ),
                         const SizedBox(height: 8),
-                        // Tags
                         Row(
                           children: [
                             if (widget.video['category'] != null) ...[
@@ -707,20 +809,20 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                               ),
                           ],
                         ),
-                        // Espace pour la barre de progression
                         const SizedBox(height: 80),
                       ],
                     ),
                   ),
                   const SizedBox(width: 16),
-                  // Actions (zone protégée des taps)
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       _buildActionButton(
-                        icon: Icons.favorite_border,
-                        label: '${widget.video['likes'] ?? 0}',
-                        onPressed: widget.onLike ?? () {},
+                        icon: _isLiked ? Icons.favorite : Icons.favorite_border,
+                        label: _likesCount.toString(),
+                        onPressed: _toggleLike,
+                        isHighlighted: _isLiked,
+                        isLoading: _isLiking,
                       ),
                       const SizedBox(height: 20),
                       _buildActionButton(
@@ -728,16 +830,16 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                         label: 'Partager',
                         onPressed: widget.onShare ?? () {},
                       ),
-                      if (widget.onRecipePressed != null) ...[
+                      if (widget.video['recipe_id'] != null) ...[
                         const SizedBox(height: 20),
                         _buildActionButton(
                           icon: Icons.restaurant_menu,
                           label: 'Recette',
-                          onPressed: widget.onRecipePressed!,
+                          onPressed: _showRecipeDrawer,
                           isHighlighted: true,
                         ),
                       ],
-                      const SizedBox(height: 80), // Espace pour la barre de progression
+                      const SizedBox(height: 80),
                     ],
                   ),
                 ],
@@ -754,9 +856,10 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
     required String label,
     required VoidCallback onPressed,
     bool isHighlighted = false,
+    bool isLoading = false,
   }) {
     return GestureDetector(
-      onTap: () {
+      onTap: isLoading ? null : () {
         HapticFeedback.lightImpact();
         onPressed();
       },
@@ -768,7 +871,7 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
             height: 48,
             decoration: BoxDecoration(
               color: isHighlighted
-                  ? AppColors.primary
+                  ? (icon == Icons.favorite ? Colors.red : AppColors.primary)
                   : Colors.black.withOpacity(0.6),
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
@@ -779,11 +882,20 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
                 ),
               ],
             ),
-            child: Icon(
-              icon,
-              color: Colors.white,
-              size: 24,
-            ),
+            child: isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Icon(
+                    icon,
+                    color: Colors.white,
+                    size: 24,
+                  ),
           ),
           const SizedBox(height: 6),
           Text(
