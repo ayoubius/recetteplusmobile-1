@@ -1,86 +1,175 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
-import '../utils/image_utils.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
 
 class ImageService {
-  static final SupabaseClient _client = Supabase.instance.client;
   static final ImagePicker _picker = ImagePicker();
 
-  /// Sélectionner une image depuis la galerie ou l'appareil photo
+  /// Afficher le sélecteur de source d'image
+  static Future<ImageSource?> showImageSourceSelector(
+      BuildContext context) async {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Choisir une photo',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSourceOption(
+                    context,
+                    'Caméra',
+                    Icons.camera_alt,
+                    ImageSource.camera,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildSourceOption(
+                    context,
+                    'Galerie',
+                    Icons.photo_library,
+                    ImageSource.gallery,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Widget _buildSourceOption(
+    BuildContext context,
+    String title,
+    IconData icon,
+    ImageSource source,
+  ) {
+    return InkWell(
+      onTap: () => Navigator.pop(context, source),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey[300]!),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, size: 32, color: Colors.grey[600]),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey[700],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Sélectionner et traiter une image
   static Future<Uint8List?> pickImage({
-    ImageSource source = ImageSource.gallery,
-    int? maxWidth,
-    int? maxHeight,
+    required ImageSource source,
+    int maxWidth = 800,
+    int maxHeight = 800,
     int imageQuality = 85,
   }) async {
     try {
       final XFile? image = await _picker.pickImage(
         source: source,
-        maxWidth: maxWidth?.toDouble(),
-        maxHeight: maxHeight?.toDouble(),
+        maxWidth: maxWidth.toDouble(),
+        maxHeight: maxHeight.toDouble(),
         imageQuality: imageQuality,
       );
 
-      if (image == null) return null;
+      if (image != null) {
+        final bytes = await image.readAsBytes();
 
-      // Lire les bytes de l'image
-      final Uint8List imageBytes = await image.readAsBytes();
+        // Vérifier la taille du fichier (max 5MB)
+        if (bytes.length > 5 * 1024 * 1024) {
+          throw Exception('Image trop volumineuse (max 5MB)');
+        }
 
-      // Valider la taille
-      if (!ImageUtils.isValidImageSize(imageBytes)) {
-        throw Exception('Image trop volumineuse (max 5MB)');
+        return bytes;
       }
-
-      // Valider le format
-      if (!ImageUtils.isValidImageFormat(image.name)) {
-        throw Exception('Format d\'image non supporté');
-      }
-
-      return imageBytes;
+      return null;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur sélection image: $e');
+        print('❌ Erreur lors de la sélection d\'image: $e');
       }
       rethrow;
     }
   }
 
-  /// Uploader un avatar utilisateur
+  /// Uploader un avatar vers Supabase Storage
   static Future<String?> uploadAvatar({
     required Uint8List imageBytes,
     required String userId,
     String? oldAvatarUrl,
   }) async {
     try {
-      // Supprimer l'ancien avatar s'il existe
+      final supabase = Supabase.instance.client;
+
+      // Supprimer l'ancien avatar si il existe
       if (oldAvatarUrl != null) {
-        await deleteAvatar(oldAvatarUrl);
+        try {
+          final oldPath = _extractPathFromUrl(oldAvatarUrl);
+          if (oldPath != null) {
+            await supabase.storage.from('avatars').remove([oldPath]);
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            print('⚠️ Erreur lors de la suppression de l\'ancien avatar: $e');
+          }
+        }
       }
 
       // Générer un nom de fichier unique
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = '$userId/avatar_$timestamp.jpg';
+      final fileName = '${userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-      // Uploader vers Supabase Storage
-      await _client.storage.from('avatars').uploadBinary(
-        fileName,
-        imageBytes,
-        fileOptions: const FileOptions(
-          contentType: 'image/jpeg',
-          upsert: true,
-        ),
-      );
+      // Uploader la nouvelle image
+      await supabase.storage.from('avatars').uploadBinary(
+            fileName,
+            imageBytes,
+            fileOptions: const FileOptions(
+              contentType: 'image/jpeg',
+              upsert: true,
+            ),
+          );
 
       // Obtenir l'URL publique
-      final publicUrl = _client.storage.from('avatars').getPublicUrl(fileName);
-
-      // Mettre à jour le profil avec la nouvelle URL
-      await _client.rpc('update_profile_avatar', params: {
-        'user_id': userId,
-        'avatar_url': publicUrl,
-      });
+      final publicUrl = supabase.storage.from('avatars').getPublicUrl(fileName);
 
       if (kDebugMode) {
         print('✅ Avatar uploadé avec succès: $publicUrl');
@@ -89,142 +178,51 @@ class ImageService {
       return publicUrl;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur upload avatar: $e');
+        print('❌ Erreur lors de l\'upload de l\'avatar: $e');
       }
       rethrow;
     }
   }
 
-  /// Supprimer un avatar
-  static Future<void> deleteAvatar(String avatarUrl) async {
+  /// Extraire le chemin du fichier depuis une URL Supabase
+  static String? _extractPathFromUrl(String url) {
     try {
-      // Extraire le chemin du fichier de l'URL
-      final uri = Uri.parse(avatarUrl);
+      final uri = Uri.parse(url);
       final pathSegments = uri.pathSegments;
-      
-      // Trouver l'index du segment 'avatars'
-      final avatarsIndex = pathSegments.indexOf('avatars');
-      if (avatarsIndex == -1 || avatarsIndex >= pathSegments.length - 1) {
-        if (kDebugMode) {
-          print('⚠️  URL d\'avatar invalide: $avatarUrl');
-        }
-        return;
+
+      // Format attendu: /storage/v1/object/public/avatars/filename
+      if (pathSegments.length >= 5 && pathSegments[3] == 'avatars') {
+        return pathSegments.last;
       }
-
-      // Construire le chemin du fichier
-      final filePath = pathSegments.sublist(avatarsIndex + 1).join('/');
-
-      // Supprimer du storage
-      await _client.storage.from('avatars').remove([filePath]);
-
-      if (kDebugMode) {
-        print('✅ Avatar supprimé: $filePath');
-      }
+      return null;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur suppression avatar: $e');
+        print('❌ Erreur lors de l\'extraction du chemin: $e');
       }
-      // Ne pas faire échouer l'opération pour une erreur de suppression
+      return null;
     }
   }
 
-  /// Redimensionner une image (placeholder pour une vraie implémentation)
-  static Future<Uint8List> resizeImage(
-    Uint8List imageBytes, {
-    int maxWidth = 400,
-    int maxHeight = 400,
-  }) async {
-    // TODO: Implémenter le redimensionnement réel avec le package image
-    // Pour l'instant, retourner l'image originale
-    return imageBytes;
-  }
+  /// Supprimer un avatar
+  static Future<bool> deleteAvatar(String avatarUrl) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final path = _extractPathFromUrl(avatarUrl);
 
-  /// Compresser une image (placeholder pour une vraie implémentation)
-  static Future<Uint8List> compressImage(
-    Uint8List imageBytes, {
-    int quality = 85,
-  }) async {
-    // TODO: Implémenter la compression réelle
-    // Pour l'instant, retourner l'image originale
-    return imageBytes;
-  }
+      if (path != null) {
+        await supabase.storage.from('avatars').remove([path]);
 
-  /// Afficher un sélecteur de source d'image
-  static Future<ImageSource?> showImageSourceSelector(BuildContext context) async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    return showModalBottomSheet<ImageSource>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2D2D2D) : Colors.white,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Handle
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.grey[600] : Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 20),
-              
-              // Titre
-              Text(
-                'Choisir une photo',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : Colors.black,
-                ),
-              ),
-              const SizedBox(height: 20),
-              
-              // Options
-              ListTile(
-                leading: const Icon(Icons.camera_alt, color: Colors.blue),
-                title: Text(
-                  'Appareil photo',
-                  style: TextStyle(
-                    color: isDark ? Colors.white : Colors.black,
-                  ),
-                ),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library, color: Colors.green),
-                title: Text(
-                  'Galerie',
-                  style: TextStyle(
-                    color: isDark ? Colors.white : Colors.black,
-                  ),
-                ),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
-              ),
-              ListTile(
-                leading: const Icon(Icons.cancel, color: Colors.red),
-                title: Text(
-                  'Annuler',
-                  style: TextStyle(
-                    color: isDark ? Colors.white : Colors.black,
-                  ),
-                ),
-                onTap: () => Navigator.pop(context),
-              ),
-              
-              const SizedBox(height: 20),
-            ],
-          ),
-        ),
-      ),
-    );
+        if (kDebugMode) {
+          print('✅ Avatar supprimé avec succès: $path');
+        }
+        return true;
+      }
+      return false;
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la suppression de l\'avatar: $e');
+      }
+      return false;
+    }
   }
 }

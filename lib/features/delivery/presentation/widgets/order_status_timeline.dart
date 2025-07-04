@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/constants/app_colors.dart';
-import '../../../../core/utils/date_utils.dart' as app_date_utils;
 import '../../data/models/order_status_history.dart';
+import '../../../../core/utils/date_utils.dart' as app_date_utils;
 
 class OrderStatusTimeline extends StatelessWidget {
   final String currentStatus;
@@ -17,8 +17,7 @@ class OrderStatusTimeline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Définir l'ordre des statuts
-    final statusOrder = [
+    final statuses = [
       'pending',
       'confirmed',
       'preparing',
@@ -26,74 +25,36 @@ class OrderStatusTimeline extends StatelessWidget {
       'out_for_delivery',
       'delivered',
     ];
-    
-    // Filtrer les statuts annulés
-    if (currentStatus == 'cancelled') {
-      return _buildCancelledTimeline();
-    }
-    
-    // Obtenir l'index du statut actuel
-    final currentStatusIndex = statusOrder.indexOf(currentStatus);
-    
+
+    final currentIndex = statuses.indexOf(currentStatus);
+
     return Column(
-      children: List.generate(statusOrder.length, (index) {
-        final status = statusOrder[index];
-        final isCompleted = index <= currentStatusIndex;
-        final isCurrent = index == currentStatusIndex;
-        
-        // Trouver l'entrée d'historique correspondante
-        final historyEntry = statusHistory
-            .where((entry) => entry.status == status)
-            .toList()
-            .isNotEmpty
-            ? statusHistory.firstWhere((entry) => entry.status == status)
-            : null;
-        
+      children: statuses.asMap().entries.map((entry) {
+        final index = entry.key;
+        final status = entry.value;
+        final isCompleted = index <= currentIndex;
+        final isCurrent = index == currentIndex;
+        final isLast = index == statuses.length - 1;
+
+        // Trouver l'historique correspondant à ce statut
+        final historyItem = statusHistory.firstWhere(
+          (h) => h.status == status,
+          orElse: () => OrderStatusHistory(
+            id: '',
+            orderId: '',
+            status: status,
+            createdAt: DateTime.now(),
+          ),
+        );
+
         return _buildTimelineItem(
           status: status,
           isCompleted: isCompleted,
           isCurrent: isCurrent,
-          isLast: index == statusOrder.length - 1,
-          timestamp: historyEntry?.createdAt,
-          notes: historyEntry?.notes,
+          isLast: isLast,
+          historyItem: statusHistory.any((h) => h.status == status) ? historyItem : null,
         );
-      }),
-    );
-  }
-
-  Widget _buildCancelledTimeline() {
-    // Trouver l'entrée d'historique pour l'annulation
-    final cancelEntry = statusHistory
-        .where((entry) => entry.status == 'cancelled')
-        .toList()
-        .isNotEmpty
-        ? statusHistory.firstWhere((entry) => entry.status == 'cancelled')
-        : null;
-    
-    return Column(
-      children: [
-        _buildTimelineItem(
-          status: 'pending',
-          isCompleted: true,
-          isCurrent: false,
-          isLast: false,
-          timestamp: statusHistory
-              .where((entry) => entry.status == 'pending')
-              .toList()
-              .isNotEmpty
-              ? statusHistory.firstWhere((entry) => entry.status == 'pending').createdAt
-              : null,
-        ),
-        _buildTimelineItem(
-          status: 'cancelled',
-          isCompleted: true,
-          isCurrent: true,
-          isLast: true,
-          timestamp: cancelEntry?.createdAt,
-          notes: cancelEntry?.notes,
-          isError: true,
-        ),
-      ],
+      }).toList(),
     );
   }
 
@@ -102,160 +63,159 @@ class OrderStatusTimeline extends StatelessWidget {
     required bool isCompleted,
     required bool isCurrent,
     required bool isLast,
-    DateTime? timestamp,
-    String? notes,
-    bool isError = false,
+    OrderStatusHistory? historyItem,
   }) {
     final statusInfo = _getStatusInfo(status);
-    final color = isError ? Colors.red : (isCompleted ? AppColors.primary : Colors.grey);
     
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Indicateur et ligne
+        // Indicateur de statut
         Column(
           children: [
-            // Indicateur (cercle)
             Container(
               width: 24,
               height: 24,
               decoration: BoxDecoration(
-                color: isCompleted ? color : Colors.transparent,
                 shape: BoxShape.circle,
+                color: isCompleted 
+                    ? (isCurrent ? AppColors.primary : Colors.green)
+                    : Colors.grey[300],
                 border: Border.all(
-                  color: color,
+                  color: isCompleted 
+                      ? (isCurrent ? AppColors.primary : Colors.green)
+                      : Colors.grey[400]!,
                   width: 2,
                 ),
               ),
-              child: isCompleted
-                  ? Icon(
-                      isCurrent ? statusInfo.icon : Icons.check,
-                      color: Colors.white,
-                      size: 14,
-                    )
-                  : null,
+              child: Icon(
+                isCompleted 
+                    ? (isCurrent ? statusInfo['icon'] : Icons.check)
+                    : statusInfo['icon'],
+                size: 12,
+                color: isCompleted ? Colors.white : Colors.grey[600],
+              ),
             ),
-            
-            // Ligne verticale
             if (!isLast)
               Container(
                 width: 2,
                 height: 40,
-                color: isCompleted ? color : Colors.grey.withOpacity(0.3),
+                color: isCompleted ? Colors.green : Colors.grey[300],
               ),
           ],
         ),
         
         const SizedBox(width: 16),
         
-        // Contenu
+        // Contenu du statut
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                statusInfo.title,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500,
-                  color: isCompleted 
-                      ? (isDark ? AppColors.getTextPrimary(isDark) : color)
-                      : AppColors.getTextSecondary(isDark),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  statusInfo['title'],
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500,
+                    color: isCompleted 
+                        ? AppColors.getTextPrimary(isDark)
+                        : AppColors.getTextSecondary(isDark),
+                  ),
                 ),
-              ),
-              if (timestamp != null) ...[
                 const SizedBox(height: 4),
                 Text(
-                  app_date_utils.AppDateUtils.formatDateTime(timestamp),
+                  statusInfo['description'],
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 14,
                     color: AppColors.getTextSecondary(isDark),
                   ),
                 ),
-              ],
-              if (notes != null && notes.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  notes,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontStyle: FontStyle.italic,
-                    color: AppColors.getTextSecondary(isDark),
+                if (historyItem != null) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.access_time,
+                        size: 14,
+                        color: AppColors.getTextSecondary(isDark),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        app_date_utils.AppDateUtils.formatDateTime(historyItem.createdAt),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppColors.getTextSecondary(isDark),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+                  if (historyItem.notes != null && historyItem.notes!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      historyItem.notes!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.getTextSecondary(isDark),
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ],
               ],
-              
-              // Espace en bas
-              const SizedBox(height: 16),
-            ],
+            ),
           ),
         ),
       ],
     );
   }
 
-  _StatusInfo _getStatusInfo(String status) {
+  Map<String, dynamic> _getStatusInfo(String status) {
     switch (status) {
       case 'pending':
-        return _StatusInfo(
-          title: 'Commande reçue',
-          icon: Icons.receipt,
-          description: 'Votre commande a été reçue et est en attente de confirmation',
-        );
+        return {
+          'title': 'Commande reçue',
+          'description': 'Votre commande a été reçue et est en attente de confirmation',
+          'icon': Icons.receipt,
+        };
       case 'confirmed':
-        return _StatusInfo(
-          title: 'Commande confirmée',
-          icon: Icons.check_circle,
-          description: 'Votre commande a été confirmée',
-        );
+        return {
+          'title': 'Commande confirmée',
+          'description': 'Votre commande a été confirmée et va être préparée',
+          'icon': Icons.check_circle,
+        };
       case 'preparing':
-        return _StatusInfo(
-          title: 'Préparation en cours',
-          icon: Icons.inventory,
-          description: 'Votre commande est en cours de préparation',
-        );
+        return {
+          'title': 'En préparation',
+          'description': 'Votre commande est en cours de préparation',
+          'icon': Icons.inventory,
+        };
       case 'ready_for_pickup':
-        return _StatusInfo(
-          title: 'Prête pour livraison',
-          icon: Icons.inventory_2,
-          description: 'Votre commande est prête à être récupérée par le livreur',
-        );
+        return {
+          'title': 'Prête pour livraison',
+          'description': 'Votre commande est prête et attend un livreur',
+          'icon': Icons.inventory_2,
+        };
       case 'out_for_delivery':
-        return _StatusInfo(
-          title: 'En cours de livraison',
-          icon: Icons.delivery_dining,
-          description: 'Votre commande est en route vers votre adresse',
-        );
+        return {
+          'title': 'En cours de livraison',
+          'description': 'Votre commande est en route vers vous',
+          'icon': Icons.delivery_dining,
+        };
       case 'delivered':
-        return _StatusInfo(
-          title: 'Commande livrée',
-          icon: Icons.home,
-          description: 'Votre commande a été livrée avec succès',
-        );
-      case 'cancelled':
-        return _StatusInfo(
-          title: 'Commande annulée',
-          icon: Icons.cancel,
-          description: 'Votre commande a été annulée',
-        );
+        return {
+          'title': 'Livrée',
+          'description': 'Votre commande a été livrée avec succès',
+          'icon': Icons.home,
+        };
       default:
-        return _StatusInfo(
-          title: 'Statut inconnu',
-          icon: Icons.help,
-          description: 'Statut non reconnu',
-        );
+        return {
+          'title': 'Statut inconnu',
+          'description': 'Statut de commande non reconnu',
+          'icon': Icons.help,
+        };
     }
   }
-}
-
-class _StatusInfo {
-  final String title;
-  final IconData icon;
-  final String description;
-
-  _StatusInfo({
-    required this.title,
-    required this.icon,
-    required this.description,
-  });
 }

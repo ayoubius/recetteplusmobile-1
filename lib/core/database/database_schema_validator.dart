@@ -6,12 +6,12 @@ class DatabaseSchemaValidator {
   /// Valide que toutes les tables requises existent
   static Future<Map<String, bool>> validateSchema() async {
     final results = <String, bool>{};
-    
+
     final requiredTables = [
       'videos',
-      'recipes', 
+      'recipes',
       'products',
-      'user_profiles',
+      'profiles',
       'favorites',
       'user_history',
       'orders',
@@ -36,19 +36,18 @@ class DatabaseSchemaValidator {
   /// Valide les fonctions de base de données
   static Future<Map<String, bool>> validateFunctions() async {
     final results = <String, bool>{};
-    
+
     final requiredFunctions = [
       'increment_video_views',
-      'increment_video_likes', 
+      'increment_video_likes',
       'increment_recipe_views',
     ];
 
     for (final function in requiredFunctions) {
       try {
         // Test avec un UUID factice pour vérifier l'existence
-        await _client.rpc(function, params: {
-          'video_id': '00000000-0000-0000-0000-000000000000'
-        });
+        await _client.rpc(function,
+            params: {'video_id': '00000000-0000-0000-0000-000000000000'});
         results[function] = true;
         print('✅ Fonction $function existe');
       } catch (e) {
@@ -56,7 +55,8 @@ class DatabaseSchemaValidator {
           results[function] = false;
           print('❌ Fonction $function manquante');
         } else {
-          results[function] = true; // Fonction existe mais erreur d'exécution normale
+          results[function] =
+              true; // Fonction existe mais erreur d'exécution normale
           print('✅ Fonction $function existe (erreur d\'exécution attendue)');
         }
       }
@@ -69,7 +69,7 @@ class DatabaseSchemaValidator {
   static Future<DatabaseValidationReport> generateReport() async {
     final tables = await validateSchema();
     final functions = await validateFunctions();
-    
+
     return DatabaseValidationReport(
       tables: tables,
       functions: functions,
@@ -92,18 +92,19 @@ class DatabaseValidationReport {
   void printReport() {
     print('\n📊 RAPPORT DE VALIDATION DE LA BASE DE DONNÉES');
     print('=' * 50);
-    
+
     print('\n📋 TABLES:');
     tables.forEach((table, exists) {
       print('  ${exists ? '✅' : '❌'} $table');
     });
-    
+
     print('\n⚙️ FONCTIONS:');
     functions.forEach((function, exists) {
       print('  ${exists ? '✅' : '❌'} $function');
     });
-    
-    print('\n🎯 STATUT GLOBAL: ${isValid ? '✅ VALIDE' : '❌ PROBLÈMES DÉTECTÉS'}');
+
+    print(
+        '\n🎯 STATUT GLOBAL: ${isValid ? '✅ VALIDE' : '❌ PROBLÈMES DÉTECTÉS'}');
     print('=' * 50);
   }
 }

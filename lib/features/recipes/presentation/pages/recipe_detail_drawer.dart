@@ -198,6 +198,8 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return AnimatedBuilder(
       animation: _animationController,
       builder: (context, child) {
@@ -208,9 +210,16 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
             opacity: _fadeAnimation.value,
             child: Container(
               height: MediaQuery.of(context).size.height * 0.9,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              decoration: BoxDecoration(
+                color: AppColors.getCardBackground(isDark),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.getShadow(isDark),
+                    blurRadius: 20,
+                    offset: const Offset(0, -5),
+                  ),
+                ],
               ),
               child: Column(
                 children: [
@@ -220,7 +229,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey[300],
+                      color: AppColors.getBorder(isDark),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -231,16 +240,20 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'Détails de la recette',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
+                            color: AppColors.getTextPrimary(isDark),
                           ),
                         ),
                         IconButton(
                           onPressed: _close,
-                          icon: const Icon(Icons.close),
+                          icon: Icon(
+                            Icons.close,
+                            color: AppColors.getTextPrimary(isDark),
+                          ),
                         ),
                       ],
                     ),
@@ -248,7 +261,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
 
                   // Contenu
                   Expanded(
-                    child: _buildContent(),
+                    child: _buildContent(isDark),
                   ),
                 ],
               ),
@@ -259,7 +272,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent(bool isDark) {
     if (_isLoading) {
       return const Center(
         child: CircularProgressIndicator(
@@ -276,14 +289,14 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
             Icon(
               Icons.error_outline,
               size: 64,
-              color: Colors.grey[400],
+              color: AppColors.getTextSecondary(isDark),
             ),
             const SizedBox(height: 16),
             Text(
               'Impossible de charger la recette',
               style: TextStyle(
                 fontSize: 16,
-                color: Colors.grey[600],
+                color: AppColors.getTextSecondary(isDark),
               ),
             ),
             const SizedBox(height: 16),
@@ -295,6 +308,10 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                 });
                 _loadRecipe();
               },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Réessayer'),
             ),
           ],
@@ -321,13 +338,13 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                     width: double.infinity,
                     height: 200,
                     decoration: BoxDecoration(
-                      color: Colors.grey[200],
+                      color: AppColors.getBackground(isDark),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
                       Icons.restaurant,
                       size: 64,
-                      color: Colors.grey[400],
+                      color: AppColors.getTextSecondary(isDark),
                     ),
                   );
                 },
@@ -339,19 +356,20 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
           // Titre et description
           Text(
             _recipe!['title'],
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
+              color: AppColors.getTextPrimary(isDark),
             ),
           ),
 
-          if (_recipe!['description'].isNotEmpty) ...[
+          if (_recipe!['description'] != null && _recipe!['description'].toString().isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
               _recipe!['description'],
               style: TextStyle(
                 fontSize: 16,
-                color: Colors.grey[600],
+                color: AppColors.getTextSecondary(isDark),
               ),
             ),
           ],
@@ -364,16 +382,19 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
               _buildStatChip(
                 Icons.access_time,
                 _recipe!['formatted_time'],
+                isDark,
               ),
               const SizedBox(width: 12),
               _buildStatChip(
                 Icons.people,
                 '${_recipe!['servings']} pers.',
+                isDark,
               ),
               const SizedBox(width: 12),
               _buildStatChip(
                 Icons.star,
                 '${_recipe!['rating']}/5',
+                isDark,
               ),
             ],
           ),
@@ -386,11 +407,12 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
               Expanded(
                 child: Row(
                   children: [
-                    const Text(
+                    Text(
                       'Difficulté: ',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
+                        color: AppColors.getTextPrimary(isDark),
                       ),
                     ),
                     Text(
@@ -405,7 +427,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                 ),
               ),
               Text(
-                'Coût: ${_recipe!['total_cost'].toStringAsFixed(2)} €',
+                'Coût: ${_recipe!['total_cost'].toStringAsFixed(2)} FCFA',
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
@@ -448,16 +470,22 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                 onPressed: _toggleFavorite,
                 icon: Icon(
                   _isFavorite ? Icons.favorite : Icons.favorite_border,
-                  color: _isFavorite ? Colors.red : Colors.grey,
+                  color: _isFavorite ? AppColors.error : AppColors.getTextSecondary(isDark),
                 ),
               ),
               IconButton(
                 onPressed: _shareRecipe,
-                icon: const Icon(Icons.share),
+                icon: Icon(
+                  Icons.share,
+                  color: AppColors.getTextSecondary(isDark),
+                ),
               ),
               IconButton(
                 onPressed: _addNotes,
-                icon: const Icon(Icons.note_add),
+                icon: Icon(
+                  Icons.note_add,
+                  color: AppColors.getTextSecondary(isDark),
+                ),
               ),
             ],
           ),
@@ -465,11 +493,12 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
           const SizedBox(height: 24),
 
           // Ingrédients
-          const Text(
+          Text(
             'Ingrédients',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
+              color: AppColors.getTextPrimary(isDark),
             ),
           ),
 
@@ -480,9 +509,9 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey[50],
+                color: AppColors.getBackground(isDark),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[200]!),
+                border: Border.all(color: AppColors.getBorder(isDark)),
               ),
               child: Row(
                 children: [
@@ -499,11 +528,11 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                               return Container(
                                 width: 40,
                                 height: 40,
-                                color: Colors.grey[300],
+                                color: AppColors.getBorder(isDark),
                                 child: Icon(
                                   Icons.image_not_supported,
                                   size: 20,
-                                  color: Colors.grey[500],
+                                  color: AppColors.getTextSecondary(isDark),
                                 ),
                               );
                             },
@@ -511,11 +540,11 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                         : Container(
                             width: 40,
                             height: 40,
-                            color: Colors.grey[300],
+                            color: AppColors.getBorder(isDark),
                             child: Icon(
                               Icons.shopping_basket,
                               size: 20,
-                              color: Colors.grey[500],
+                              color: AppColors.getTextSecondary(isDark),
                             ),
                           ),
                   ),
@@ -528,9 +557,10 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                       children: [
                         Text(
                           ingredient['name'],
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w500,
+                            color: AppColors.getTextPrimary(isDark),
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -538,7 +568,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                           '${ingredient['quantity']} ${ingredient['unit']}',
                           style: TextStyle(
                             fontSize: 14,
-                            color: Colors.grey[600],
+                            color: AppColors.getTextSecondary(isDark),
                           ),
                         ),
                       ],
@@ -550,7 +580,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        '${ingredient['price'].toStringAsFixed(2)} €',
+                        '${ingredient['price'].toStringAsFixed(2)} FCFA',
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
@@ -565,8 +595,8 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                         ),
                         decoration: BoxDecoration(
                           color: ingredient['in_stock']
-                              ? Colors.green[100]
-                              : Colors.red[100],
+                              ? AppColors.success.withOpacity(0.2)
+                              : AppColors.error.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
@@ -574,8 +604,8 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                           style: TextStyle(
                             fontSize: 10,
                             color: ingredient['in_stock']
-                                ? Colors.green[700]
-                                : Colors.red[700],
+                                ? AppColors.success
+                                : AppColors.error,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -590,11 +620,12 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
           const SizedBox(height: 24),
 
           // Instructions
-          const Text(
+          Text(
             'Instructions',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
+              color: AppColors.getTextPrimary(isDark),
             ),
           ),
 
@@ -630,7 +661,10 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
                             entry.value,
-                            style: const TextStyle(fontSize: 16),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: AppColors.getTextPrimary(isDark),
+                            ),
                           ),
                         ),
                       ),
@@ -645,11 +679,11 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
     );
   }
 
-  Widget _buildStatChip(IconData icon, String text) {
+  Widget _buildStatChip(IconData icon, String text, bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
+        color: AppColors.getBackground(isDark),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -658,14 +692,14 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
           Icon(
             icon,
             size: 16,
-            color: Colors.grey[600],
+            color: AppColors.getTextSecondary(isDark),
           ),
           const SizedBox(width: 4),
           Text(
             text,
             style: TextStyle(
               fontSize: 14,
-              color: Colors.grey[600],
+              color: AppColors.getTextSecondary(isDark),
             ),
           ),
         ],
@@ -676,13 +710,13 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
   Color _getDifficultyColor(String difficulty) {
     switch (difficulty.toLowerCase()) {
       case 'facile':
-        return Colors.green;
+        return AppColors.success;
       case 'moyen':
-        return Colors.orange;
+        return AppColors.warning;
       case 'difficile':
-        return Colors.red;
+        return AppColors.error;
       default:
-        return Colors.grey;
+        return AppColors.textSecondary;
     }
   }
 }

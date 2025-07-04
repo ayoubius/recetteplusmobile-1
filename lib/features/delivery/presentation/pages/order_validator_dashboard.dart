@@ -44,10 +44,10 @@ class _OrderValidatorDashboardState extends State<OrderValidatorDashboard> {
     }
 
     try {
-      // Charger les commandes en attente
+      // Charger les commandes en attente depuis le service
       final pendingOrders = await DeliveryService.getPendingOrders();
       
-      // Charger les livreurs disponibles
+      // Charger les livreurs disponibles depuis le service
       final deliveryPersons = await DeliveryService.getAllDeliveryPersons();
       
       if (mounted) {
@@ -440,7 +440,6 @@ class _OrderValidatorDashboardState extends State<OrderValidatorDashboard> {
   Widget _buildOrderCard(Map<String, dynamic> order, bool isDark) {
     final orderObj = Order.fromJson(order);
     final profile = order['profiles'] as Map<String, dynamic>?;
-    final zone = order['delivery_zones'] as Map<String, dynamic>?;
     
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -569,28 +568,6 @@ class _OrderValidatorDashboardState extends State<OrderValidatorDashboard> {
                             fontSize: 14,
                             color: AppColors.getTextPrimary(isDark),
                           ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                
-                // Zone de livraison
-                if (zone != null) ...[
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.map,
-                        size: 20,
-                        color: AppColors.getTextSecondary(isDark),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Zone: ${zone['name']}',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppColors.getTextPrimary(isDark),
                         ),
                       ),
                     ],

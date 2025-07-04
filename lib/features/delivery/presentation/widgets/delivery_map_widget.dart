@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import '../../../../core/constants/app_colors.dart';
+import 'package:flutter/foundation.dart';
 
 class DeliveryMapWidget extends StatefulWidget {
   final double? latitude;
@@ -18,7 +16,7 @@ class DeliveryMapWidget extends StatefulWidget {
     this.deliveryAddress,
     this.destinationLatitude,
     this.destinationLongitude,
-    this.showControls = true,
+    this.showControls = false,
   });
 
   @override
@@ -26,370 +24,293 @@ class DeliveryMapWidget extends StatefulWidget {
 }
 
 class _DeliveryMapWidgetState extends State<DeliveryMapWidget> {
-  late MapController _mapController;
-  double _zoom = 15.0;
-  bool _isFullScreen = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _mapController = MapController();
-  }
-
-  @override
-  void dispose() {
-    _mapController.dispose();
-    super.dispose();
-  }
-
-  void _zoomIn() {
-    setState(() {
-      _zoom = (_zoom + 1).clamp(3.0, 18.0);
-      _mapController.move(_getCurrentCenter(), _zoom);
-    });
-  }
-
-  void _zoomOut() {
-    setState(() {
-      _zoom = (_zoom - 1).clamp(3.0, 18.0);
-      _mapController.move(_getCurrentCenter(), _zoom);
-    });
-  }
-
-  void _recenter() {
-    if (widget.latitude != null && widget.longitude != null) {
-      _mapController.move(
-        LatLng(widget.latitude!, widget.longitude!),
-        _zoom,
-      );
-    }
-  }
-
-  void _toggleFullScreen() {
-    setState(() {
-      _isFullScreen = !_isFullScreen;
-    });
-  }
-
-  LatLng _getCurrentCenter() {
-    if (widget.latitude != null && widget.longitude != null) {
-      return LatLng(widget.latitude!, widget.longitude!);
-    }
-    // Coordonnées par défaut (Bamako, Mali)
-    return const LatLng(12.6392, -8.0029);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final hasCoordinates = widget.latitude != null && widget.longitude != null;
-    final hasDestination = widget.destinationLatitude != null && widget.destinationLongitude != null;
-    
-    if (!hasCoordinates) {
-      return _buildPlaceholder();
-    }
-
-    return Stack(
-      children: [
-        // Carte
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: _getCurrentCenter(),
-            initialZoom: _zoom,
-            minZoom: 3,
-            maxZoom: 18,
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.grey[200],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Stack(
+        children: [
+          // Carte simulée
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.blue[100]!,
+                  Colors.green[100]!,
+                ],
+              ),
+            ),
+            child: CustomPaint(
+              painter: _MapPainter(
+                deliveryLatitude: widget.latitude,
+                deliveryLongitude: widget.longitude,
+                destinationLatitude: widget.destinationLatitude,
+                destinationLongitude: widget.destinationLongitude,
+              ),
+            ),
           ),
-          children: [
-            // Couche de tuiles OpenStreetMap
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.recetteplus.app',
-              tileProvider: NetworkTileProvider(),
-            ),
-            
-            // Marqueurs
-            MarkerLayer(
-              markers: [
-                // Marqueur de position actuelle
-                if (hasCoordinates)
-                  Marker(
-                    point: LatLng(widget.latitude!, widget.longitude!),
-                    width: 60,
-                    height: 60,
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.2),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.delivery_dining,
-                            color: Colors.white,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(10),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: const Text(
-                            'Livreur',
-                            style: TextStyle(
-                              color: AppColors.primary,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                
-                // Marqueur de destination
-                if (hasDestination)
-                  Marker(
-                    point: LatLng(widget.destinationLatitude!, widget.destinationLongitude!),
-                    width: 60,
-                    height: 60,
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.red,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.2),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.location_on,
-                            color: Colors.white,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(10),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: const Text(
-                            'Destination',
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
-        
-        // Overlay avec informations
-        if (widget.deliveryAddress != null && widget.showControls)
+          
+          // Overlay d'informations
           Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
+            top: 16,
+            left: 16,
+            right: 16,
             child: Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.7),
-                    Colors.transparent,
-                  ],
-                ),
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'Adresse de livraison',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+                  if (widget.latitude != null && widget.longitude != null) ...[
+                    Row(
+                      children: [
+                        Container(
+                          width: 12,
+                          height: 12,
+                          decoration: const BoxDecoration(
+                            color: Colors.blue,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Position du livreur',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 4),
+                  ],
+                  if (widget.deliveryAddress != null) ...[
+                    Row(
+                      children: [
+                        Container(
+                          width: 12,
+                          height: 12,
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            widget.deliveryAddress!,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          
+          // Contrôles de la carte (si activés)
+          if (widget.showControls) ...[
+            Positioned(
+              bottom: 16,
+              right: 16,
+              child: Column(
+                children: [
+                  FloatingActionButton.small(
+                    heroTag: "zoom_in",
+                    onPressed: () {
+                      if (kDebugMode) {
+                        print('🔍 Zoom avant');
+                      }
+                    },
+                    backgroundColor: Colors.white,
+                    child: const Icon(Icons.add, color: Colors.black87),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
+                  FloatingActionButton.small(
+                    heroTag: "zoom_out",
+                    onPressed: () {
+                      if (kDebugMode) {
+                        print('🔍 Zoom arrière');
+                      }
+                    },
+                    backgroundColor: Colors.white,
+                    child: const Icon(Icons.remove, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 8),
+                  FloatingActionButton.small(
+                    heroTag: "center_map",
+                    onPressed: () {
+                      if (kDebugMode) {
+                        print('🎯 Centrer la carte');
+                      }
+                    },
+                    backgroundColor: Colors.white,
+                    child: const Icon(Icons.my_location, color: Colors.black87),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          
+          // Indicateur de chargement si pas de position
+          if (widget.latitude == null || widget.longitude == null)
+            const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.location_searching,
+                    size: 48,
+                    color: Colors.grey,
+                  ),
+                  SizedBox(height: 16),
                   Text(
-                    widget.deliveryAddress!,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
+                    'Localisation en cours...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
               ),
             ),
-          ),
-        
-        // Contrôles de la carte
-        if (widget.showControls)
-          Positioned(
-            top: 16,
-            right: 16,
-            child: Column(
-              children: [
-                // Bouton plein écran
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: IconButton(
-                    icon: Icon(_isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen),
-                    onPressed: _toggleFullScreen,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // Bouton zoom +
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: _zoomIn,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // Bouton zoom -
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.remove),
-                    onPressed: _zoomOut,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // Bouton recentrer
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.my_location),
-                    onPressed: _recenter,
-                    color: Colors.black87,
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildPlaceholder() {
-    return Container(
-      color: Colors.grey[200],
-      child: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.location_off,
-              size: 60,
-              color: Colors.grey,
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Position non disponible',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
-            ),
-            SizedBox(height: 8),
-            Text(
-              'Le livreur n\'a pas encore partagé sa position',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
+}
+
+class _MapPainter extends CustomPainter {
+  final double? deliveryLatitude;
+  final double? deliveryLongitude;
+  final double? destinationLatitude;
+  final double? destinationLongitude;
+
+  _MapPainter({
+    this.deliveryLatitude,
+    this.deliveryLongitude,
+    this.destinationLatitude,
+    this.destinationLongitude,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    
+    // Dessiner des "routes" simulées
+    paint.color = Colors.white.withOpacity(0.8);
+    paint.strokeWidth = 3;
+    paint.style = PaintingStyle.stroke;
+    
+    final path = Path();
+    path.moveTo(size.width * 0.1, size.height * 0.2);
+    path.quadraticBezierTo(
+      size.width * 0.5, size.height * 0.1,
+      size.width * 0.9, size.height * 0.3,
+    );
+    path.quadraticBezierTo(
+      size.width * 0.7, size.height * 0.6,
+      size.width * 0.8, size.height * 0.9,
+    );
+    
+    canvas.drawPath(path, paint);
+    
+    // Dessiner la position du livreur (point bleu)
+    if (deliveryLatitude != null && deliveryLongitude != null) {
+      paint.color = Colors.blue;
+      paint.style = PaintingStyle.fill;
+      
+      // Position simulée basée sur les coordonnées
+      final x = size.width * 0.4;
+      final y = size.height * 0.6;
+      
+      canvas.drawCircle(Offset(x, y), 8, paint);
+      
+      // Halo autour du point
+      paint.color = Colors.blue.withOpacity(0.3);
+      canvas.drawCircle(Offset(x, y), 16, paint);
+    }
+    
+    // Dessiner la destination (point rouge)
+    if (destinationLatitude != null && destinationLongitude != null) {
+      paint.color = Colors.red;
+      paint.style = PaintingStyle.fill;
+      
+      // Position simulée de la destination
+      final x = size.width * 0.7;
+      final y = size.height * 0.3;
+      
+      canvas.drawCircle(Offset(x, y), 8, paint);
+      
+      // Halo autour du point
+      paint.color = Colors.red.withOpacity(0.3);
+      canvas.drawCircle(Offset(x, y), 16, paint);
+    }
+    
+    // Dessiner une ligne entre le livreur et la destination
+    if (deliveryLatitude != null && destinationLatitude != null) {
+      paint.color = Colors.purple.withOpacity(0.6);
+      paint.strokeWidth = 2;
+      paint.style = PaintingStyle.stroke;
+      
+      final dashPaint = Paint()
+        ..color = Colors.purple.withOpacity(0.6)
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke;
+      
+      const dashWidth = 5.0;
+      const dashSpace = 3.0;
+      
+      final start = Offset(size.width * 0.4, size.height * 0.6);
+      final end = Offset(size.width * 0.7, size.height * 0.3);
+      
+      _drawDashedLine(canvas, start, end, dashPaint, dashWidth, dashSpace);
+    }
+  }
+  
+  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint, double dashWidth, double dashSpace) {
+    final distance = (end - start).distance;
+    final dashCount = (distance / (dashWidth + dashSpace)).floor();
+    
+    for (int i = 0; i < dashCount; i++) {
+      final startRatio = (i * (dashWidth + dashSpace)) / distance;
+      final endRatio = ((i * (dashWidth + dashSpace)) + dashWidth) / distance;
+      
+      final dashStart = Offset.lerp(start, end, startRatio)!;
+      final dashEnd = Offset.lerp(start, end, endRatio)!;
+      
+      canvas.drawLine(dashStart, dashEnd, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

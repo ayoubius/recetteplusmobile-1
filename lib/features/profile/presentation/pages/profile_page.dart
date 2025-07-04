@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/services/google_auth_service.dart';
 import '../../../../core/services/supabase_service.dart';
+import '../../../../core/services/delivery_service.dart';
 import 'edit_profile_page.dart';
 import 'favorites_page.dart';
 import 'history_page.dart';
@@ -11,6 +13,7 @@ import 'settings_page.dart';
 import 'privacy_page.dart';
 import 'help_support_page.dart';
 import '../../../delivery/presentation/pages/user_orders_page.dart';
+import '../../../auth/presentation/pages/welcome_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -26,6 +29,7 @@ class _ProfilePageState extends State<ProfilePage>
   int _favoritesCount = 0;
   int _historyCount = 0;
   int _recipesCount = 0;
+  int _activeOrdersCount = 0;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
@@ -92,15 +96,19 @@ class _ProfilePageState extends State<ProfilePage>
         final favorites = await SupabaseService.getUserFavorites();
         final history = await SupabaseService.getUserHistory();
 
-        // TODO: Compter les recettes créées par l'utilisateur
-        // final recipes = await SupabaseService.getUserRecipes(user.id);
+        // Charger les recettes créées par l'utilisateur
+        final userRecipes = await SupabaseService.getUserRecipes(user.id);
+
+        // Charger les commandes actives depuis le service de livraison
+        final activeDeliveries = await _loadActiveOrders();
 
         if (mounted) {
           setState(() {
             _userProfile = profile;
             _favoritesCount = favorites.length;
             _historyCount = history.length;
-            _recipesCount = 0; // TODO: recipes.length
+            _recipesCount = userRecipes.length;
+            _activeOrdersCount = activeDeliveries.length;
             _isLoading = false;
           });
           _animationController.forward();
@@ -112,7 +120,23 @@ class _ProfilePageState extends State<ProfilePage>
           _isLoading = false;
         });
         _animationController.forward();
+
+        if (kDebugMode) {
+          print('❌ Erreur lors du chargement des données utilisateur: $e');
+        }
       }
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadActiveOrders() async {
+    try {
+      // Utiliser directement le service de livraison importé
+      return await DeliveryService.getUserActiveDeliveries();
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors du chargement des commandes actives: $e');
+      }
+      return [];
     }
   }
 
@@ -134,6 +158,15 @@ class _ProfilePageState extends State<ProfilePage>
         user?.userMetadata?['full_name'] ??
         user?.email?.split('@')[0] ??
         'Utilisateur';
+  }
+
+  String? _getAvatarUrl() {
+    final user = Supabase.instance.client.auth.currentUser;
+
+    // Priorité: avatar_url du profil > photo_url du profil > avatar_url des métadonnées
+    return _userProfile?['avatar_url'] ??
+        _userProfile?['photo_url'] ??
+        user?.userMetadata?['avatar_url'];
   }
 
   @override
@@ -160,7 +193,12 @@ class _ProfilePageState extends State<ProfilePage>
                           // Header avec photo de profil
                           _buildProfileHeader(user, isDark),
 
-                          const SizedBox(height: 32),
+                          const SizedBox(height: 24),
+
+                          // Bouton de commandes en haut
+                          _buildOrdersQuickAccess(isDark),
+
+                          const SizedBox(height: 24),
 
                           // Statistiques
                           _buildStatsSection(isDark),
@@ -182,6 +220,120 @@ class _ProfilePageState extends State<ProfilePage>
                   ),
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildOrdersQuickAccess(bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.secondary,
+            AppColors.secondary.withOpacity(0.8),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.secondary.withOpacity(0.3),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const UserOrdersPage(),
+            ),
+          ).then((_) => _loadUserData()); // Recharger après retour
+        },
+        borderRadius: BorderRadius.circular(20),
+        child: Row(
+          children: [
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.3),
+                  width: 2,
+                ),
+              ),
+              child: const Icon(
+                Icons.shopping_bag_rounded,
+                color: Colors.white,
+                size: 30,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Mes Commandes',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _activeOrdersCount > 0
+                        ? '$_activeOrdersCount commande${_activeOrdersCount > 1 ? 's' : ''} en cours'
+                        : 'Aucune commande en cours',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.white.withOpacity(0.9),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_activeOrdersCount > 0)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  _activeOrdersCount.toString(),
+                  style: const TextStyle(
+                    color: AppColors.secondary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -227,6 +379,8 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   Widget _buildProfileHeader(User? user, bool isDark) {
+    final avatarUrl = _getAvatarUrl();
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(32),
@@ -289,9 +443,9 @@ class _ProfilePageState extends State<ProfilePage>
                   ],
                 ),
                 child: ClipOval(
-                  child: _userProfile?['photo_url'] != null
+                  child: avatarUrl != null
                       ? Image.network(
-                          _userProfile!['photo_url'],
+                          avatarUrl,
                           fit: BoxFit.cover,
                           width: 120,
                           height: 120,
@@ -303,25 +457,11 @@ class _ProfilePageState extends State<ProfilePage>
                             );
                           },
                         )
-                      : user?.userMetadata?['avatar_url'] != null
-                          ? Image.network(
-                              user!.userMetadata!['avatar_url'],
-                              fit: BoxFit.cover,
-                              width: 120,
-                              height: 120,
-                              errorBuilder: (context, error, stackTrace) {
-                                return const Icon(
-                                  Icons.person,
-                                  size: 60,
-                                  color: Colors.white,
-                                );
-                              },
-                            )
-                          : const Icon(
-                              Icons.person,
-                              size: 60,
-                              color: Colors.white,
-                            ),
+                      : const Icon(
+                          Icons.person,
+                          size: 60,
+                          color: Colors.white,
+                        ),
                 ),
               ),
               // Badge en ligne avec animation
@@ -372,7 +512,8 @@ class _ProfilePageState extends State<ProfilePage>
           ),
 
           // Bio si disponible
-          if (_userProfile?['bio'] != null) ...[
+          if (_userProfile?['bio'] != null &&
+              _userProfile!['bio'].toString().isNotEmpty) ...[
             const SizedBox(height: 12),
             Text(
               _userProfile!['bio'],
@@ -388,7 +529,8 @@ class _ProfilePageState extends State<ProfilePage>
           ],
 
           // Localisation si disponible
-          if (_userProfile?['location'] != null) ...[
+          if (_userProfile?['location'] != null &&
+              _userProfile!['location'].toString().isNotEmpty) ...[
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -670,21 +812,6 @@ class _ProfilePageState extends State<ProfilePage>
           },
           isDark: isDark,
         ),
-        _buildProfileOption(
-          context,
-          icon: Icons.shopping_bag_rounded,
-          title: 'Mes commandes',
-          subtitle: 'Suivi et historique de vos commandes',
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const UserOrdersPage(),
-              ),
-            );
-          },
-          isDark: isDark,
-        ),
       ],
     );
   }
@@ -845,7 +972,11 @@ class _ProfilePageState extends State<ProfilePage>
               await GoogleAuthService.signOut();
 
               if (context.mounted) {
-                // Navigation automatique gérée par AuthWrapper
+                // Rediriger vers la page d'accueil après déconnexion
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (context) => const WelcomePage()),
+                  (route) => false,
+                );
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Déconnexion réussie'),

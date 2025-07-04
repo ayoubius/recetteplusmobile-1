@@ -174,7 +174,7 @@ class RecipeService {
     }
   }
 
-  // Ajouter aux favoris (nécessite authentification)
+  // Ajouter aux favoris (nécessite authentification) - CORRIGÉ pour votre DB
   static Future<bool> addToFavorites(String recipeId) async {
     if (!SupabaseService.isInitialized) {
       print('❌ Supabase non initialisé, impossible d\'ajouter aux favoris.');
@@ -183,9 +183,25 @@ class RecipeService {
     try {
       final user = _client!.auth.currentUser;
       if (user == null) return false;
+      
+      // Vérifier si déjà en favoris
+      final existing = await _client!
+          .from('favorites')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('item_id', recipeId)
+          .eq('type', 'recipe')
+          .maybeSingle();
+      
+      if (existing != null) {
+        print('⚠️ Recette déjà en favoris');
+        return true;
+      }
+      
       await _client!.from('favorites').insert({
         'user_id': user.id,
-        'recipe_id': recipeId,
+        'item_id': recipeId,
+        'type': 'recipe',
         'created_at': DateTime.now().toIso8601String(),
       });
       return true;
@@ -195,7 +211,7 @@ class RecipeService {
     }
   }
 
-  // Retirer des favoris
+  // Retirer des favoris - CORRIGÉ pour votre DB
   static Future<bool> removeFromFavorites(String recipeId) async {
     if (!SupabaseService.isInitialized) {
       print('❌ Supabase non initialisé, impossible de retirer des favoris.');
@@ -208,7 +224,8 @@ class RecipeService {
           .from('favorites')
           .delete()
           .eq('user_id', user.id)
-          .eq('recipe_id', recipeId);
+          .eq('item_id', recipeId)
+          .eq('type', 'recipe');
       return true;
     } catch (e) {
       print('❌ Erreur lors de la suppression des favoris: $e');
@@ -216,7 +233,7 @@ class RecipeService {
     }
   }
 
-  // Vérifier si une recette est en favoris
+  // Vérifier si une recette est en favoris - CORRIGÉ pour votre DB
   static Future<bool> isFavorite(String recipeId) async {
     if (!SupabaseService.isInitialized) {
       print('❌ Supabase non initialisé, impossible de vérifier les favoris.');
@@ -229,7 +246,8 @@ class RecipeService {
           .from('favorites')
           .select('id')
           .eq('user_id', user.id)
-          .eq('recipe_id', recipeId)
+          .eq('item_id', recipeId)
+          .eq('type', 'recipe')
           .maybeSingle();
       return response != null;
     } catch (e) {
@@ -238,7 +256,7 @@ class RecipeService {
     }
   }
 
-  // Récupérer les favoris de l'utilisateur
+  // Récupérer les favoris de l'utilisateur - CORRIGÉ pour votre DB
   static Future<List<Map<String, dynamic>>> getUserFavorites() async {
     if (!SupabaseService.isInitialized) {
       print('❌ Supabase non initialisé, impossible de récupérer les favoris.');
@@ -249,12 +267,13 @@ class RecipeService {
       if (user == null) return [];
       final response = await _client!
           .from('favorites')
-          .select('recipe_id')
-          .eq('user_id', user.id);
+          .select('item_id')
+          .eq('user_id', user.id)
+          .eq('type', 'recipe');
       if (response.isNotEmpty) {
         List<Map<String, dynamic>> recipes = [];
         for (var favorite in response) {
-          final recipe = await getRecipeById(favorite['recipe_id']);
+          final recipe = await getRecipeById(favorite['item_id']);
           if (recipe != null) {
             recipes.add(recipe);
           }
@@ -505,16 +524,22 @@ class RecipeService {
     }
   }
 
-  // Créer un panier à partir d'une recette
+  // Créer un panier à partir d'une recette - CORRIGÉ pour correspondre EXACTEMENT au schéma DB
   static Future<bool> createCartFromRecipe(String recipeId) async {
     try {
       final user = _client!.auth.currentUser;
-      if (user == null) return false;
+      if (user == null) {
+        print('❌ Utilisateur non connecté');
+        return false;
+      }
 
       final recipe = await getRecipeById(recipeId);
-      if (recipe == null) return false;
+      if (recipe == null) {
+        print('❌ Recette non trouvée');
+        return false;
+      }
 
-      // Créer un nouveau panier recette
+      // Créer un nouveau panier recette - SEULEMENT avec les colonnes qui existent dans le schéma
       final cartResponse = await _client!
           .from('recipe_carts')
           .insert({
@@ -527,22 +552,84 @@ class RecipeService {
           .single();
 
       final cartId = cartResponse['id'];
+      print('✅ Panier créé avec ID: $cartId');
 
       // Ajouter les ingrédients au panier
       final ingredients = recipe['ingredients'] as List<Map<String, dynamic>>;
+      
+      if (ingredients.isEmpty) {
+        print('⚠️ Aucun ingrédient trouvé pour cette recette');
+        return true; // Le panier est créé même sans ingrédients
+      }
+
       for (final ingredient in ingredients) {
-        await _client!.from('cart_items').insert({
-          'cart_id': cartId,
-          'product_id': ingredient['product_id'],
-          'quantity': ingredient['quantity'].round(),
-          'unit_price': ingredient['price'],
-          'created_at': DateTime.now().toIso8601String(),
-        });
+        try {
+          final quantity = ingredient['quantity'].round();
+          final unitPrice = ingredient['price'];
+          final totalPrice = unitPrice * quantity;
+          
+          await _client!.from('cart_items').insert({
+            'cart_id': cartId,
+            'product_id': ingredient['product_id'],
+            'quantity': quantity,
+            'unit_price': unitPrice,
+            'total_price': totalPrice,
+            'created_at': DateTime.now().toIso8601String(),
+          });
+          print('✅ Ingrédient ajouté: ${ingredient['name']}');
+        } catch (e) {
+          print('⚠️ Erreur ajout ingrédient ${ingredient['name']}: $e');
+        }
       }
 
       return true;
     } catch (e) {
       print('❌ Erreur lors de la création du panier: $e');
+      return false;
+    }
+  }
+
+  // Récupérer les paniers de l'utilisateur
+  static Future<List<Map<String, dynamic>>> getUserCarts() async {
+    try {
+      final user = _client!.auth.currentUser;
+      if (user == null) return [];
+
+      final response = await _client!
+          .from('recipe_carts')
+          .select('*, cart_items(*)')
+          .eq('user_id', user.id)
+          .order('created_at', ascending: false);
+
+      return response;
+    } catch (e) {
+      print('❌ Erreur lors de la récupération des paniers: $e');
+      return [];
+    }
+  }
+
+  // Supprimer un panier
+  static Future<bool> deleteCart(String cartId) async {
+    try {
+      final user = _client!.auth.currentUser;
+      if (user == null) return false;
+
+      // Supprimer d'abord les items du panier
+      await _client!
+          .from('cart_items')
+          .delete()
+          .eq('cart_id', cartId);
+
+      // Puis supprimer le panier
+      await _client!
+          .from('recipe_carts')
+          .delete()
+          .eq('id', cartId)
+          .eq('user_id', user.id);
+
+      return true;
+    } catch (e) {
+      print('❌ Erreur lors de la suppression du panier: $e');
       return false;
     }
   }

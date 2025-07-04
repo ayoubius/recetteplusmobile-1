@@ -1,92 +1,176 @@
 import 'package:flutter/foundation.dart';
+import 'dart:async';
+import 'dart:math';
+import 'package:recette_plus/features/delivery/data/models/delivery_person.dart';
+import 'package:recette_plus/features/delivery/data/models/order.dart';
+import 'package:recette_plus/features/delivery/data/models/order_tracking.dart';
+import 'package:recette_plus/features/delivery/data/models/order_status_history.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../features/delivery/data/models/delivery_person.dart';
-import '../../features/delivery/data/models/order_tracking.dart';
-import '../../features/delivery/data/models/order_status_history.dart';
-import '../../features/delivery/data/models/delivery_zone.dart';
-import '../../features/delivery/data/models/order.dart';
+import 'supabase_service.dart';
 
 class DeliveryService {
-  static final SupabaseClient _client = Supabase.instance.client;
-  static RealtimeChannel? _orderTrackingChannel;
+  static StreamController<Map<String, dynamic>>? _trackingController;
 
-  // ==================== LIVREURS ====================
-  
-  /// Vérifier si l'utilisateur actuel est un livreur
-  static Future<bool> isDeliveryPerson() async {
+  // Frais de livraison fixe pour Bamako
+  static const double fixedDeliveryFee = 1000.0;
+
+  /// Générer un UUID v4 simple sans dépendance externe
+  static String _generateUuid() {
+    final random = Random();
+    final bytes = List<int>.generate(16, (i) => random.nextInt(256));
+
+    // Version 4 UUID format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant bits
+
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}';
+  }
+
+  // ==================== CRÉATION DE COMMANDES ====================
+
+  /// Créer une commande avec livraison
+  static Future<Order?> createOrderWithDelivery({
+    required String userId,
+    required double totalAmount,
+    required List<Map<String, dynamic>> items,
+    required String deliveryAddress,
+    String? deliveryNotes,
+    Map<String, dynamic>? additionalData,
+  }) async {
     try {
-      final response = await _client.rpc('is_delivery_person');
-      return response as bool;
+      if (!SupabaseService.isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
+      // Générer un vrai UUID pour l'ID de commande
+      final orderId = _generateUuid();
+      final qrCode =
+          'QR-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+
+      // Préparer les données de base pour la commande (seulement les colonnes qui existent)
+      final orderData = {
+        'id': orderId,
+        'user_id': userId,
+        'total_amount': totalAmount + fixedDeliveryFee,
+        'delivery_fee': fixedDeliveryFee,
+        'status': 'pending',
+        'delivery_address': deliveryAddress,
+        'qr_code': qrCode,
+        'created_at': DateTime.now().toIso8601String(),
+        'items': items,
+      };
+
+      // Ajouter les notes de livraison si fournies
+      if (deliveryNotes != null && deliveryNotes.isNotEmpty) {
+        orderData['delivery_notes'] = deliveryNotes;
+      }
+
+      // Ajouter les coordonnées GPS directement dans la table orders si disponibles
+      if (additionalData != null) {
+        if (additionalData['delivery_latitude'] != null) {
+          orderData['delivery_latitude'] = additionalData['delivery_latitude'];
+        }
+        if (additionalData['delivery_longitude'] != null) {
+          orderData['delivery_longitude'] =
+              additionalData['delivery_longitude'];
+        }
+      }
+
+      // Insérer la commande dans la base de données
+      await SupabaseService.client.from('orders').insert(orderData);
+
+      // Créer l'objet Order pour le retour
+      final order = Order(
+        id: orderId,
+        userId: userId,
+        totalAmount: totalAmount + fixedDeliveryFee,
+        deliveryFee: fixedDeliveryFee,
+        status: 'pending',
+        deliveryAddress: deliveryAddress,
+        deliveryNotes: deliveryNotes,
+        qrCode: qrCode,
+        createdAt: DateTime.now(),
+        estimatedDeliveryTime: DateTime.now().add(const Duration(minutes: 45)),
+        items: items,
+      );
+
+      if (kDebugMode) {
+        print('✅ Commande créée avec succès: ${order.id}');
+        print('📍 Adresse de livraison: $deliveryAddress');
+        print('💰 Montant total: ${order.totalAmount} FCFA');
+        print('🚚 Frais de livraison: $fixedDeliveryFee FCFA');
+        print('📦 Nombre d\'articles: ${items.length}');
+        print('⏰ Livraison estimée: ${order.estimatedDeliveryTime}');
+      }
+
+      return order;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur vérification livreur: $e');
+        print('❌ Erreur création commande: $e');
       }
-      return false;
+      throw Exception('Impossible de créer la commande: $e');
     }
   }
 
-  /// Obtenir le profil du livreur pour l'utilisateur actuel
-  static Future<DeliveryPerson?> getCurrentDeliveryPersonProfile() async {
+  /// Obtenir les commandes d'un utilisateur
+  static Future<List<Order>> getUserOrders(String userId) async {
     try {
-      final userId = _client.auth.currentUser?.id;
-      if (userId == null) return null;
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - retour liste vide');
+        }
+        return [];
+      }
 
-      final response = await _client
-          .from('delivery_persons')
-          .select()
+      final response = await SupabaseService.client
+          .from('orders')
+          .select('*')
           .eq('user_id', userId)
-          .single();
-
-      return DeliveryPerson.fromJson(response);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur récupération profil livreur: $e');
-      }
-      return null;
-    }
-  }
-
-  /// Obtenir tous les livreurs (pour les administrateurs)
-  static Future<List<Map<String, dynamic>>> getAllDeliveryPersons() async {
-    try {
-      final response = await _client
-          .from('delivery_persons')
-          .select('*, profiles(*)') // Joindre les profils utilisateurs
           .order('created_at', ascending: false);
 
-      return List<Map<String, dynamic>>.from(response);
+      if (kDebugMode) {
+        print(
+            '📦 ${response.length} commandes trouvées pour l\'utilisateur $userId');
+      }
+
+      return response.map((orderData) => Order.fromJson(orderData)).toList();
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur récupération livreurs: $e');
+        print('❌ Erreur récupération commandes utilisateur: $e');
       }
       return [];
     }
   }
 
-  /// Créer un profil de livreur
-  static Future<DeliveryPerson?> createDeliveryPerson({
-    required String userId,
-    String? vehicleType,
-    String? licensePlate,
-  }) async {
-    try {
-      final response = await _client
-          .from('delivery_persons')
-          .insert({
-            'user_id': userId,
-            'vehicle_type': vehicleType,
-            'license_plate': licensePlate,
-            'current_status': 'available',
-            'created_at': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .select()
-          .single();
+  // ==================== GESTION DES LIVREURS ====================
 
-      return DeliveryPerson.fromJson(response);
+  /// Obtenir le profil du livreur actuel
+  static Future<DeliveryPerson?> getCurrentDeliveryPersonProfile() async {
+    try {
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - aucun profil livreur');
+        }
+        return null;
+      }
+
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) return null;
+
+      final response = await SupabaseService.client
+          .from('delivery_persons')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      if (response != null) {
+        return DeliveryPerson.fromJson(response);
+      }
+      return null;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur création livreur: $e');
+        print('❌ Erreur récupération profil livreur: $e');
       }
       return null;
     }
@@ -98,13 +182,22 @@ class DeliveryService {
     required String status,
   }) async {
     try {
-      await _client
-          .from('delivery_persons')
-          .update({
-            'current_status': status,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', deliveryPersonId);
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print(
+              '⚠️ Supabase non initialisé - impossible de mettre à jour le statut');
+        }
+        return false;
+      }
+
+      await SupabaseService.client.from('delivery_persons').update({
+        'current_status': status,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', deliveryPersonId);
+
+      if (kDebugMode) {
+        print('✅ Statut livreur mis à jour: $deliveryPersonId -> $status');
+      }
 
       return true;
     } catch (e) {
@@ -115,19 +208,71 @@ class DeliveryService {
     }
   }
 
-  // ==================== COMMANDES ====================
-  
-  /// Obtenir les commandes assignées au livreur actuel
+  /// Obtenir tous les livreurs
+  static Future<List<Map<String, dynamic>>> getAllDeliveryPersons() async {
+    try {
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - retour liste vide');
+        }
+        return [];
+      }
+
+      final response =
+          await SupabaseService.client.from('delivery_persons').select('''
+            *,
+            profiles!delivery_persons_user_id_fkey (
+              display_name,
+              phone_number
+            )
+          ''');
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur récupération livreurs: $e');
+      }
+      return [];
+    }
+  }
+
+  // ==================== GESTION DES COMMANDES ====================
+
+  /// Obtenir les commandes assignées à un livreur
   static Future<List<Map<String, dynamic>>> getAssignedOrders() async {
     try {
-      final deliveryPerson = await getCurrentDeliveryPersonProfile();
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - retour liste vide');
+        }
+        return [];
+      }
+
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) return [];
+
+      // Récupérer d'abord le profil de livreur
+      final deliveryPerson = await SupabaseService.client
+          .from('delivery_persons')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
       if (deliveryPerson == null) return [];
 
-      final response = await _client
+      // Correction: Utiliser une jointure explicite via delivery_tracking
+      final response = await SupabaseService.client
           .from('orders')
-          .select('*, profiles(*), order_tracking(*)')
-          .eq('delivery_person_id', deliveryPerson.id)
-          .or('status.eq.out_for_delivery,status.eq.ready_for_pickup')
+          .select('''
+            *,
+            profiles!orders_user_id_fkey (
+              display_name,
+              phone_number
+            ),
+            delivery_tracking!delivery_tracking_order_id_fkey (*)
+          ''')
+          .eq('delivery_person_id', deliveryPerson['id'])
+          .inFilter('status', ['ready_for_pickup', 'out_for_delivery'])
           .order('created_at', ascending: false);
 
       return List<Map<String, dynamic>>.from(response);
@@ -139,18 +284,41 @@ class DeliveryService {
     }
   }
 
-  /// Obtenir l'historique des commandes livrées par le livreur actuel
+  /// Obtenir l'historique des livraisons
   static Future<List<Map<String, dynamic>>> getDeliveryHistory() async {
     try {
-      final deliveryPerson = await getCurrentDeliveryPersonProfile();
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - retour liste vide');
+        }
+        return [];
+      }
+
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) return [];
+
+      // Récupérer d'abord le profil de livreur
+      final deliveryPerson = await SupabaseService.client
+          .from('delivery_persons')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
       if (deliveryPerson == null) return [];
 
-      final response = await _client
+      final response = await SupabaseService.client
           .from('orders')
-          .select('*, profiles(*)')
-          .eq('delivery_person_id', deliveryPerson.id)
+          .select('''
+            *,
+            profiles!orders_user_id_fkey (
+              display_name,
+              phone_number
+            )
+          ''')
+          .eq('delivery_person_id', deliveryPerson['id'])
           .eq('status', 'delivered')
-          .order('actual_delivery_time', ascending: false);
+          .order('created_at', ascending: false)
+          .limit(20);
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
@@ -161,14 +329,171 @@ class DeliveryService {
     }
   }
 
-  /// Obtenir les commandes en attente de livraison (pour les validateurs)
+  /// Mettre à jour le statut d'une commande
+  static Future<bool> updateOrderStatus({
+    required String orderId,
+    required String status,
+  }) async {
+    try {
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print(
+              '⚠️ Supabase non initialisé - impossible de mettre à jour le statut');
+        }
+        return false;
+      }
+
+      final updateData = {
+        'status': status,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      // Si la commande est livrée, ajouter la date de livraison
+      if (status == 'delivered') {
+        updateData['actual_delivery_time'] = DateTime.now().toIso8601String();
+      }
+
+      await SupabaseService.client
+          .from('orders')
+          .update(updateData)
+          .eq('id', orderId);
+
+      if (kDebugMode) {
+        print('✅ Statut commande mis à jour: $orderId -> $status');
+      }
+
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur mise à jour statut commande: $e');
+      }
+      return false;
+    }
+  }
+
+  // ==================== GESTION DU SUIVI ====================
+
+  /// Obtenir le suivi d'une commande
+  static Future<OrderTracking?> getOrderTracking(String orderId) async {
+    try {
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - aucun suivi disponible');
+        }
+        return null;
+      }
+
+      final response = await SupabaseService.client
+          .from('delivery_tracking')
+          .select('*')
+          .eq('order_id', orderId)
+          .maybeSingle();
+
+      if (response != null) {
+        return OrderTracking.fromJson(response);
+      }
+      return null;
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur récupération suivi commande: $e');
+      }
+      return null;
+    }
+  }
+
+  /// Mettre à jour la position de livraison
+  static Future<bool> updateDeliveryLocation({
+    required String trackingId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print(
+              '⚠️ Supabase non initialisé - impossible de mettre à jour la position');
+        }
+        return false;
+      }
+
+      await SupabaseService.client.from('delivery_tracking').update({
+        'current_latitude': latitude,
+        'current_longitude': longitude,
+        'last_updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', trackingId);
+
+      if (kDebugMode) {
+        print('📍 Position mise à jour: $trackingId -> $latitude, $longitude');
+      }
+
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur mise à jour position: $e');
+      }
+      return false;
+    }
+  }
+
+  /// Obtenir l'historique des statuts d'une commande
+  static Future<List<OrderStatusHistory>> getOrderStatusHistory(
+      String orderId) async {
+    try {
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - retour liste vide');
+        }
+        return [];
+      }
+
+      // Vérifier si la table existe avant de faire la requête
+      try {
+        final response = await SupabaseService.client
+            .from('order_status_history')
+            .select('*')
+            .eq('order_id', orderId)
+            .order('created_at', ascending: true);
+
+        return response
+            .map((data) => OrderStatusHistory.fromJson(data))
+            .toList();
+      } catch (e) {
+        if (kDebugMode) {
+          print('⚠️ Table order_status_history non disponible: $e');
+        }
+        return [];
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur récupération historique statuts: $e');
+      }
+      return [];
+    }
+  }
+
+  // ==================== GESTION DES COMMANDES EN ATTENTE ====================
+
+  /// Obtenir les commandes en attente de validation
   static Future<List<Map<String, dynamic>>> getPendingOrders() async {
     try {
-      final response = await _client
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - retour liste vide');
+        }
+        return [];
+      }
+
+      final response = await SupabaseService.client
           .from('orders')
-          .select('*, profiles(*), delivery_zones(*)')
-          .or('status.eq.confirmed,status.eq.preparing,status.eq.ready_for_pickup')
-          .filter('delivery_person_id', 'is', null)
+          .select('''
+            *,
+            profiles!orders_user_id_fkey (
+              display_name,
+              phone_number
+            )
+          ''')
+          .inFilter('status', ['confirmed', 'preparing', 'ready_for_pickup'])
+          .isFilter('delivery_person_id', null)
           .order('created_at', ascending: true);
 
       return List<Map<String, dynamic>>.from(response);
@@ -186,13 +511,39 @@ class DeliveryService {
     required String deliveryPersonId,
   }) async {
     try {
-      await _client.rpc(
-        'assign_delivery_person',
-        params: {
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print(
+              '⚠️ Supabase non initialisé - impossible d\'assigner un livreur');
+        }
+        return false;
+      }
+
+      await SupabaseService.client.from('orders').update({
+        'delivery_person_id': deliveryPersonId,
+        'status': 'out_for_delivery',
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', orderId);
+
+      // Créer un enregistrement de suivi si la table existe
+      try {
+        await SupabaseService.client.from('delivery_tracking').insert({
           'order_id': orderId,
           'delivery_person_id': deliveryPersonId,
-        },
-      );
+          'current_latitude': 12.6392, // Position par défaut Bamako
+          'current_longitude': -8.0029,
+          'last_updated_at': DateTime.now().toIso8601String(),
+          'notes': 'Prise en charge par le livreur',
+        });
+      } catch (trackingError) {
+        if (kDebugMode) {
+          print('⚠️ Erreur création suivi (non critique): $trackingError');
+        }
+      }
+
+      if (kDebugMode) {
+        print('✅ Livreur assigné: $orderId -> $deliveryPersonId');
+      }
 
       return true;
     } catch (e) {
@@ -203,168 +554,37 @@ class DeliveryService {
     }
   }
 
-  /// Mettre à jour le statut d'une commande
-  static Future<bool> updateOrderStatus({
-    required String orderId,
-    required String status,
-    String? notes,
-  }) async {
-    try {
-      await _client.rpc(
-        'update_order_status',
-        params: {
-          'order_id': orderId,
-          'new_status': status,
-          'notes': notes,
-        },
-      );
+  // ==================== GESTION DES COMMANDES UTILISATEUR ====================
 
-      return true;
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur mise à jour statut commande: $e');
-      }
-      return false;
-    }
-  }
-
-  /// Générer un code QR pour une commande
-  static Future<String?> generateOrderQRCode(String orderId) async {
-    try {
-      final response = await _client.rpc(
-        'generate_order_qr_code',
-        params: {
-          'order_id': orderId,
-        },
-      );
-
-      return response as String;
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur génération code QR: $e');
-      }
-      return null;
-    }
-  }
-
-  // ==================== SUIVI DE LIVRAISON ====================
-  
-  /// Obtenir les informations de suivi d'une commande
-  static Future<OrderTracking?> getOrderTracking(String orderId) async {
-    try {
-      final response = await _client
-          .from('order_tracking')
-          .select()
-          .eq('order_id', orderId)
-          .single();
-
-      return OrderTracking.fromJson(response);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur récupération suivi commande: $e');
-      }
-      return null;
-    }
-  }
-
-  /// Mettre à jour la position du livreur
-  static Future<bool> updateDeliveryLocation({
-    required String trackingId,
-    required double latitude,
-    required double longitude,
-  }) async {
-    try {
-      await _client.rpc(
-        'update_delivery_location',
-        params: {
-          'tracking_id': trackingId,
-          'latitude': latitude,
-          'longitude': longitude,
-        },
-      );
-
-      return true;
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur mise à jour position: $e');
-      }
-      return false;
-    }
-  }
-
-  /// Obtenir l'historique des statuts d'une commande
-  static Future<List<OrderStatusHistory>> getOrderStatusHistory(String orderId) async {
-    try {
-      final response = await _client
-          .from('order_status_history')
-          .select('*, profiles:created_by(*)')
-          .eq('order_id', orderId)
-          .order('created_at', ascending: true);
-
-      return List<Map<String, dynamic>>.from(response)
-          .map((json) => OrderStatusHistory.fromJson(json))
-          .toList();
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur récupération historique statuts: $e');
-      }
-      return [];
-    }
-  }
-
-  // ==================== ZONES DE LIVRAISON ====================
-  
-  /// Obtenir toutes les zones de livraison actives
-  static Future<List<DeliveryZone>> getActiveDeliveryZones() async {
-    try {
-      final response = await _client
-          .from('delivery_zones')
-          .select()
-          .eq('is_active', true)
-          .order('name');
-
-      return List<Map<String, dynamic>>.from(response)
-          .map((json) => DeliveryZone.fromJson(json))
-          .toList();
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur récupération zones de livraison: $e');
-      }
-      return [];
-    }
-  }
-
-  /// Obtenir une zone de livraison par ID
-  static Future<DeliveryZone?> getDeliveryZoneById(String zoneId) async {
-    try {
-      final response = await _client
-          .from('delivery_zones')
-          .select()
-          .eq('id', zoneId)
-          .single();
-
-      return DeliveryZone.fromJson(response);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur récupération zone de livraison: $e');
-      }
-      return null;
-    }
-  }
-
-  // ==================== COMMANDES UTILISATEUR ====================
-  
-  /// Obtenir les commandes de l'utilisateur actuel avec suivi
+  /// Obtenir les commandes d'un utilisateur avec suivi
   static Future<List<Map<String, dynamic>>> getUserOrdersWithTracking() async {
     try {
-      final userId = _client.auth.currentUser?.id;
-      if (userId == null) return [];
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - retour liste vide');
+        }
+        return [];
+      }
 
-      final response = await _client
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) {
+        if (kDebugMode) {
+          print('⚠️ Utilisateur non connecté');
+        }
+        return [];
+      }
+
+      // Simplifier la requête pour éviter les problèmes de relations
+      final response = await SupabaseService.client
           .from('orders')
-          .select('*, order_tracking(*), delivery_zones(*), delivery_persons(*)')
-          .eq('user_id', userId)
+          .select('*')
+          .eq('user_id', user.id)
           .order('created_at', ascending: false);
+
+      if (kDebugMode) {
+        print(
+            '✅ ${response.length} commandes récupérées pour l\'utilisateur ${user.id}');
+      }
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
@@ -375,18 +595,41 @@ class DeliveryService {
     }
   }
 
-  /// Obtenir les commandes en cours de livraison pour l'utilisateur actuel
+  /// Obtenir les livraisons actives d'un utilisateur
   static Future<List<Map<String, dynamic>>> getUserActiveDeliveries() async {
     try {
-      final userId = _client.auth.currentUser?.id;
-      if (userId == null) return [];
+      if (!SupabaseService.isInitialized) {
+        if (kDebugMode) {
+          print('⚠️ Supabase non initialisé - retour liste vide');
+        }
+        return [];
+      }
 
-      final response = await _client
+      final user = SupabaseService.client.auth.currentUser;
+      if (user == null) {
+        if (kDebugMode) {
+          print('⚠️ Utilisateur non connecté');
+        }
+        return [];
+      }
+
+      // Simplifier la requête pour éviter les problèmes de relations
+      final response = await SupabaseService.client
           .from('orders')
-          .select('*, order_tracking(*), delivery_zones(*), delivery_persons(*), profiles:delivery_persons(profiles(*))')
-          .eq('user_id', userId)
-          .or('status.eq.out_for_delivery,status.eq.ready_for_pickup')
-          .order('created_at', ascending: false);
+          .select('*')
+          .eq('user_id', user.id)
+          .inFilter('status', [
+        'pending',
+        'confirmed',
+        'preparing',
+        'ready_for_pickup',
+        'out_for_delivery'
+      ]).order('created_at', ascending: false);
+
+      if (kDebugMode) {
+        print(
+            '✅ ${response.length} livraisons actives récupérées pour l\'utilisateur ${user.id}');
+      }
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
@@ -397,133 +640,79 @@ class DeliveryService {
     }
   }
 
-  /// Créer une nouvelle commande avec livraison
-  static Future<Order?> createOrderWithDelivery({
-    required String userId,
-    required double totalAmount,
-    required dynamic items,
-    required String deliveryAddress,
-    required String deliveryZoneId,
-    String? deliveryNotes,
-    Map<String, dynamic>? additionalData,
-  }) async {
-    try {
-      // Récupérer les frais de livraison pour la zone
-      final zone = await getDeliveryZoneById(deliveryZoneId);
-      if (zone == null) throw Exception('Zone de livraison non trouvée');
+  // ==================== STREAMING ET TEMPS RÉEL ====================
 
-      // Préparer les données de la commande
-      final orderData = {
-        'user_id': userId,
-        'total_amount': totalAmount,
-        'status': 'pending',
-        'items': items,
-        'delivery_address': deliveryAddress,
-        'delivery_zone_id': deliveryZoneId,
-        'delivery_fee': zone.deliveryFee,
-        'delivery_notes': deliveryNotes,
-        'created_at': DateTime.now().toIso8601String(),
-      };
-      
-      // Ajouter les données supplémentaires si fournies
-      if (additionalData != null) {
-        orderData.addAll(additionalData);
-      }
-
-      // Créer la commande
-      final response = await _client
-          .from('orders')
-          .insert(orderData)
-          .select()
-          .single();
-
-      final order = Order.fromJson(response);
-      
-      // Générer un code QR pour la commande
-      await generateOrderQRCode(order.id);
-      
-      // Créer un canal de suivi en temps réel pour cette commande
-      _subscribeToOrderTracking(order.id);
-      
-      return order;
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur création commande: $e');
-      }
-      return null;
-    }
-  }
-  
   /// S'abonner aux mises à jour de suivi d'une commande
-  static void _subscribeToOrderTracking(String orderId) {
-    try {
-      // Fermer le canal précédent s'il existe
-      _orderTrackingChannel?.unsubscribe();
-      
-      // Créer un nouveau canal pour écouter les changements
-      _orderTrackingChannel = _client
-          .channel('order_tracking_$orderId')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'order_tracking',
-            filter: PostgresChangeFilter(
-              type: PostgresChangeFilterType.eq,
-              column: 'order_id',
-              value: orderId,
-            ),
-            callback: (payload) {
-              if (kDebugMode) {
-                print('✅ Mise à jour de suivi reçue: ${payload.newRecord}');
+  static Stream<Map<String, dynamic>> subscribeToOrderTracking(String orderId) {
+    _trackingController ??= StreamController<Map<String, dynamic>>.broadcast();
+
+    if (SupabaseService.isInitialized) {
+      try {
+        // Utiliser les subscriptions en temps réel de Supabase
+        SupabaseService.client
+            .from('delivery_tracking')
+            .stream(primaryKey: ['id'])
+            .eq('order_id', orderId)
+            .listen((data) {
+              if (data.isNotEmpty && _trackingController?.isClosed == false) {
+                final tracking = data.first;
+                _trackingController?.add({
+                  'order_id': orderId,
+                  'latitude': tracking['current_latitude'],
+                  'longitude': tracking['current_longitude'],
+                  'timestamp': tracking['last_updated_at'],
+                  'status': 'out_for_delivery',
+                });
+
+                if (kDebugMode) {
+                  print('📡 Mise à jour position reçue pour commande $orderId');
+                }
               }
-            },
-          )
-          .subscribe();
-      
-      if (kDebugMode) {
-        print('✅ Canal créé pour la commande $orderId');
+            });
+      } catch (e) {
+        if (kDebugMode) {
+          print('❌ Erreur subscription temps réel: $e');
+        }
       }
-    } catch (e) {
+    } else {
       if (kDebugMode) {
-        print('❌ Erreur abonnement suivi commande: $e');
+        print('⚠️ Supabase non initialisé - pas de suivi temps réel');
       }
     }
+
+    return _trackingController!.stream;
   }
-  
-  /// Se désabonner du suivi d'une commande
+
+  /// Se désabonner du suivi de commande
   static void unsubscribeFromOrderTracking() {
-    _orderTrackingChannel?.unsubscribe();
-    _orderTrackingChannel = null;
+    _trackingController?.close();
+    _trackingController = null;
+
+    if (kDebugMode) {
+      print('📡 Déconnexion du suivi temps réel');
+    }
   }
-  
-  /// Obtenir un stream de mises à jour de position pour une commande
-  static RealtimeChannel? getOrderLocationUpdates(String orderId) {
-    try {
-      final channel = _client
-          .channel('delivery_location_$orderId')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'order_tracking',
-            filter: PostgresChangeFilter(
-              type: PostgresChangeFilterType.eq,
-              column: 'order_id',
-              value: orderId,
-            ),
-            callback: (payload) {
-              if (kDebugMode) {
-                print('📍 Mise à jour de position: ${payload.newRecord}');
-              }
-            },
-          )
-          .subscribe();
-      
-      return channel;
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur création stream de position: $e');
-      }
-      return null;
+
+  // ==================== MÉTHODES UTILITAIRES ====================
+
+  static String _getStatusNotes(String status) {
+    switch (status) {
+      case 'pending':
+        return 'Commande en attente de confirmation';
+      case 'confirmed':
+        return 'Commande confirmée par le restaurant';
+      case 'preparing':
+        return 'Préparation en cours';
+      case 'ready_for_pickup':
+        return 'Commande prête pour la livraison';
+      case 'out_for_delivery':
+        return 'Prise en charge par le livreur';
+      case 'delivered':
+        return 'Commande livrée avec succès';
+      case 'cancelled':
+        return 'Commande annulée';
+      default:
+        return 'Mise à jour du statut';
     }
   }
 }

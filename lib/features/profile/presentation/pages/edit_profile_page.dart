@@ -66,7 +66,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
             _phoneController.text = profile?['phone_number'] ?? '';
             _bioController.text = profile?['bio'] ?? '';
             _locationController.text = profile?['location'] ?? '';
-            _currentAvatarUrl = profile?['photo_url'];
+            // Correction: utiliser avatar_url au lieu de photo_url
+            _currentAvatarUrl = profile?['avatar_url'] ?? profile?['photo_url'];
             _isLoadingProfile = false;
           });
         }
@@ -121,6 +122,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
           'location': _locationController.text.trim().isNotEmpty
               ? _locationController.text.trim()
               : null,
+          // Conserver l'avatar_url actuel si il existe
+          if (_currentAvatarUrl != null) 'avatar_url': _currentAvatarUrl,
         },
       );
 
@@ -188,6 +191,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
         );
 
         if (mounted && newAvatarUrl != null) {
+          // Mettre à jour le profil avec la nouvelle URL d'avatar
+          await SupabaseService.updateUserProfile(
+            userId: user.id,
+            additionalData: {
+              'avatar_url': newAvatarUrl,
+            },
+          );
+
           setState(() {
             _currentAvatarUrl = newAvatarUrl;
             _isUploadingImage = false;

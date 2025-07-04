@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:async';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/services/delivery_service.dart';
-import '../../../../core/utils/date_utils.dart' as app_date_utils;
-import '../../data/models/order.dart';
-import 'order_tracking_page.dart';
+import '../../../../core/utils/currency_utils.dart';
 
 class UserOrdersPage extends StatefulWidget {
   const UserOrdersPage({super.key});
@@ -14,76 +11,56 @@ class UserOrdersPage extends StatefulWidget {
   State<UserOrdersPage> createState() => _UserOrdersPageState();
 }
 
-class _UserOrdersPageState extends State<UserOrdersPage> with TickerProviderStateMixin {
+class _UserOrdersPageState extends State<UserOrdersPage>
+    with TickerProviderStateMixin {
   List<Map<String, dynamic>> _orders = [];
-  List<Map<String, dynamic>> _activeDeliveries = [];
+  List<Map<String, dynamic>> _activeOrders = [];
   bool _isLoading = true;
-  String _currentTab = 'active'; // 'active' ou 'history'
+  String? _error;
   late TabController _tabController;
-  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _tabController.addListener(_handleTabChange);
-    _loadData();
-    
-    // Rafraîchir les données toutes les 60 secondes
-    _refreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
-      _loadData(silent: true);
-    });
+    _loadOrders();
   }
 
   @override
   void dispose() {
-    _tabController.removeListener(_handleTabChange);
     _tabController.dispose();
-    _refreshTimer?.cancel();
     super.dispose();
   }
 
-  void _handleTabChange() {
-    if (!_tabController.indexIsChanging) {
-      setState(() {
-        _currentTab = _tabController.index == 0 ? 'active' : 'history';
-      });
-    }
-  }
-
-  Future<void> _loadData({bool silent = false}) async {
-    if (!silent) {
-      setState(() {
-        _isLoading = true;
-      });
-    }
+  Future<void> _loadOrders() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
 
     try {
-      // Charger les commandes de l'utilisateur
-      final orders = await DeliveryService.getUserOrdersWithTracking();
-      
-      // Charger les livraisons actives
-      final activeDeliveries = await DeliveryService.getUserActiveDeliveries();
-      
+      // Charger toutes les commandes
+      final allOrders = await DeliveryService.getUserOrdersWithTracking();
+
+      // Charger les commandes actives
+      final activeOrders = await DeliveryService.getUserActiveDeliveries();
+
       if (mounted) {
         setState(() {
-          _orders = orders;
-          _activeDeliveries = activeDeliveries;
+          _orders = allOrders;
+          _activeOrders = activeOrders;
           _isLoading = false;
         });
+
+        // Feedback haptique léger
+        HapticFeedback.lightImpact();
       }
     } catch (e) {
-      if (mounted && !silent) {
+      if (mounted) {
         setState(() {
+          _error = e.toString();
           _isLoading = false;
         });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
       }
     }
   }
@@ -91,194 +68,246 @@ class _UserOrdersPageState extends State<UserOrdersPage> with TickerProviderStat
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       backgroundColor: AppColors.getBackground(isDark),
       appBar: AppBar(
-        title: const Text('Mes commandes'),
+        title: const Text('Mes Commandes'),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Colors.white,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
           tabs: [
             Tab(
-              icon: const Icon(Icons.delivery_dining),
-              text: 'En cours (${_activeDeliveries.length})',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.access_time, size: 20),
+                  const SizedBox(width: 8),
+                  const Text('En cours'),
+                  if (_activeOrders.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _activeOrders.length.toString(),
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
             const Tab(
-              icon: Icon(Icons.history),
-              text: 'Historique',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.history, size: 20),
+                  SizedBox(width: 8),
+                  Text('Historique'),
+                ],
+              ),
             ),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => _loadData(),
-          ),
-        ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                // Onglet des livraisons actives
-                _activeDeliveries.isEmpty
-                    ? _buildEmptyActiveDeliveries(isDark)
-                    : _buildActiveDeliveriesList(isDark),
-                
-                // Onglet de l'historique
-                _orders.isEmpty
-                    ? _buildEmptyOrderHistory(isDark)
-                    : _buildOrderHistoryList(isDark),
-              ],
-            ),
+      body: _buildBody(isDark),
     );
   }
 
-  Widget _buildEmptyActiveDeliveries(bool isDark) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.delivery_dining,
-            size: 80,
-            color: AppColors.getTextSecondary(isDark),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Aucune livraison en cours',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppColors.getTextPrimary(isDark),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Vos commandes en cours de livraison apparaîtront ici',
-            style: TextStyle(
-              fontSize: 14,
-              color: AppColors.getTextSecondary(isDark),
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () {
-              // Naviguer vers la page des produits
-              Navigator.pop(context);
-            },
-            icon: const Icon(Icons.shopping_bag),
-            label: const Text('Découvrir nos produits'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyOrderHistory(bool isDark) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.history,
-            size: 80,
-            color: AppColors.getTextSecondary(isDark),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Aucune commande passée',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppColors.getTextPrimary(isDark),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Vos commandes passées apparaîtront ici',
-            style: TextStyle(
-              fontSize: 14,
-              color: AppColors.getTextSecondary(isDark),
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () {
-              // Naviguer vers la page des produits
-              Navigator.pop(context);
-            },
-            icon: const Icon(Icons.shopping_bag),
-            label: const Text('Découvrir nos produits'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActiveDeliveriesList(bool isDark) {
-    return RefreshIndicator(
-      onRefresh: _loadData,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _activeDeliveries.length,
-        itemBuilder: (context, index) {
-          final order = _activeDeliveries[index];
-          return _buildActiveDeliveryCard(order, isDark);
-        },
-      ),
-    );
-  }
-
-  Widget _buildOrderHistoryList(bool isDark) {
-    // Filtrer pour exclure les commandes actives
-    final historyOrders = _orders.where((order) {
-      final status = order['status'] as String? ?? '';
-      return status == 'delivered' || status == 'cancelled';
-    }).toList();
-    
-    if (historyOrders.isEmpty) {
-      return _buildEmptyOrderHistory(isDark);
+  Widget _buildBody(bool isDark) {
+    if (_isLoading) {
+      return _buildLoadingState(isDark);
     }
-    
+
+    if (_error != null) {
+      return _buildErrorState(isDark);
+    }
+
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        // Onglet commandes actives
+        _buildOrdersList(_activeOrders, isDark, isActive: true),
+        // Onglet historique
+        _buildOrdersList(_orders, isDark, isActive: false),
+      ],
+    );
+  }
+
+  Widget _buildLoadingState(bool isDark) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Chargement de vos commandes...',
+            style: TextStyle(
+              color: AppColors.getTextSecondary(isDark),
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState(bool isDark) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 80,
+              color: AppColors.getTextSecondary(isDark),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Erreur de chargement',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: AppColors.getTextPrimary(isDark),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.getTextSecondary(isDark),
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _loadOrders,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Réessayer'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrdersList(
+    List<Map<String, dynamic>> orders,
+    bool isDark, {
+    required bool isActive,
+  }) {
+    if (orders.isEmpty) {
+      return _buildEmptyState(isDark, isActive);
+    }
+
     return RefreshIndicator(
-      onRefresh: _loadData,
+      onRefresh: _loadOrders,
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: historyOrders.length,
+        itemCount: orders.length,
         itemBuilder: (context, index) {
-          final order = historyOrders[index];
-          return _buildOrderHistoryCard(order, isDark);
+          final order = orders[index];
+          return _buildOrderCard(order, isDark);
         },
       ),
     );
   }
 
-  Widget _buildActiveDeliveryCard(Map<String, dynamic> order, bool isDark) {
-    final orderObj = Order.fromJson(order);
-    final tracking = order['order_tracking'] as List?;
-    final deliveryPerson = order['delivery_persons'] as Map<String, dynamic>?;
-    final deliveryPersonProfile = deliveryPerson != null && order['profiles'] != null
-        ? order['profiles'] as Map<String, dynamic>?
-        : null;
-    
+  Widget _buildEmptyState(bool isDark, bool isActive) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isActive ? Icons.shopping_bag_outlined : Icons.history,
+              size: 80,
+              color: AppColors.getTextSecondary(isDark),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              isActive ? 'Aucune commande en cours' : 'Aucun historique',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: AppColors.getTextPrimary(isDark),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              isActive
+                  ? 'Vos commandes en cours apparaîtront ici'
+                  : 'Vos commandes passées apparaîtront ici',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.getTextSecondary(isDark),
+              ),
+            ),
+            if (isActive) ...[
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () {
+                  // Navigation vers la page de commande
+                  Navigator.pop(context);
+                },
+                icon: const Icon(Icons.shopping_cart),
+                label: const Text('Passer une commande'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrderCard(Map<String, dynamic> order, bool isDark) {
+    final status = _safeGetString(order, 'status', 'unknown');
+    final totalAmount = _safeGetDouble(order, 'total_amount', 0.0);
+    final deliveryAddress =
+        _safeGetString(order, 'delivery_address', 'Adresse non spécifiée');
+    final createdAt =
+        DateTime.tryParse(_safeGetString(order, 'created_at', '')) ??
+            DateTime.now();
+    final items = _safeGetList(order, 'items');
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -288,411 +317,387 @@ class _UserOrdersPageState extends State<UserOrdersPage> with TickerProviderStat
           BoxShadow(
             color: AppColors.getShadow(isDark),
             blurRadius: 10,
-            offset: const Offset(0, 4),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: InkWell(
         onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => OrderTrackingPage(
-                orderId: orderObj.id,
-              ),
-            ),
-          ).then((_) => _loadData());
+          HapticFeedback.lightImpact();
+          _showOrderDetails(order, isDark);
         },
         borderRadius: BorderRadius.circular(16),
-        child: Column(
-          children: [
-            // En-tête
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: _getOrderStatusColor(orderObj.status).withOpacity(0.1),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(16),
-                ),
-              ),
-              child: Row(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // En-tête avec statut et date
+              Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: _getOrderStatusColor(orderObj.status).withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      _getOrderStatusIcon(orderObj.status),
-                      color: _getOrderStatusColor(orderObj.status),
-                      size: 24,
-                    ),
-                  ),
+                  Expanded(child: _buildStatusChip(status, isDark)),
                   const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Commande #${orderObj.id.substring(0, 8)}',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.getTextPrimary(isDark),
-                          ),
-                        ),
-                        if (orderObj.createdAt != null)
-                          Text(
-                            app_date_utils.AppDateUtils.formatDateTime(orderObj.createdAt!),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppColors.getTextSecondary(isDark),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _getOrderStatusColor(orderObj.status),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _getOrderStatusDisplay(orderObj.status),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
+                  Text(
+                    _formatDate(createdAt),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.getTextSecondary(isDark),
                     ),
                   ),
                 ],
               ),
-            ),
-            
-            // Contenu
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
+              const SizedBox(height: 16),
+
+              // ID de commande
+              Row(
+                children: [
+                  Icon(
+                    Icons.receipt_long,
+                    size: 16,
+                    color: AppColors.getTextSecondary(isDark),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Commande #${_safeGetString(order, 'id', 'N/A').substring(0, 8)}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.getTextPrimary(isDark),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Adresse de livraison
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Livreur
-                  if (deliveryPersonProfile != null) ...[
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.delivery_dining,
-                          size: 20,
-                          color: AppColors.getTextSecondary(isDark),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Livreur: ${deliveryPersonProfile['display_name'] ?? 'Inconnu'}',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: AppColors.getTextPrimary(isDark),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  
-                  // Adresse
-                  if (orderObj.deliveryAddress != null) ...[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          Icons.location_on,
-                          size: 20,
-                          color: AppColors.getTextSecondary(isDark),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Adresse: ${orderObj.deliveryAddress}',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: AppColors.getTextPrimary(isDark),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  
-                  // Heure estimée
-                  if (orderObj.estimatedDeliveryTime != null) ...[
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.access_time,
-                          size: 20,
-                          color: AppColors.getTextSecondary(isDark),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Livraison estimée: ${app_date_utils.AppDateUtils.formatDateTime(orderObj.estimatedDeliveryTime!)}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  
-                  // Montant
-                  if (orderObj.totalAmount != null) ...[
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.payments,
-                          size: 20,
-                          color: AppColors.getTextSecondary(isDark),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Montant: ${orderObj.totalAmount!.toStringAsFixed(0)} FCFA',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.getTextPrimary(isDark),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  
-                  // Bouton de suivi
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => OrderTrackingPage(
-                              orderId: orderObj.id,
-                            ),
-                          ),
-                        ).then((_) => _loadData());
-                      },
-                      icon: const Icon(Icons.map, size: 16),
-                      label: const Text('Suivre la livraison'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
+                  Icon(
+                    Icons.location_on,
+                    size: 16,
+                    color: AppColors.getTextSecondary(isDark),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      deliveryAddress,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.getTextSecondary(isDark),
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+
+              // Nombre d'articles
+              Row(
+                children: [
+                  Icon(
+                    Icons.shopping_bag,
+                    size: 16,
+                    color: AppColors.getTextSecondary(isDark),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${items.length} article${items.length > 1 ? 's' : ''}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: AppColors.getTextSecondary(isDark),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Prix et bouton d'action
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    CurrencyUtils.formatPrice(totalAmount),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  Icon(
+                    Icons.arrow_forward_ios,
+                    size: 16,
+                    color: AppColors.getTextSecondary(isDark),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildOrderHistoryCard(Map<String, dynamic> order, bool isDark) {
-    final orderObj = Order.fromJson(order);
-    
+  Widget _buildStatusChip(String status, bool isDark) {
+    Color backgroundColor;
+    Color textColor;
+    String displayText;
+
+    switch (status.toLowerCase()) {
+      case 'pending':
+        backgroundColor = Colors.orange.withOpacity(0.1);
+        textColor = Colors.orange;
+        displayText = 'En attente';
+        break;
+      case 'confirmed':
+        backgroundColor = Colors.blue.withOpacity(0.1);
+        textColor = Colors.blue;
+        displayText = 'Confirmée';
+        break;
+      case 'preparing':
+        backgroundColor = Colors.purple.withOpacity(0.1);
+        textColor = Colors.purple;
+        displayText = 'En préparation';
+        break;
+      case 'ready_for_pickup':
+        backgroundColor = Colors.teal.withOpacity(0.1);
+        textColor = Colors.teal;
+        displayText = 'Prête';
+        break;
+      case 'out_for_delivery':
+        backgroundColor = AppColors.primary.withOpacity(0.1);
+        textColor = AppColors.primary;
+        displayText = 'En livraison';
+        break;
+      case 'delivered':
+        backgroundColor = Colors.green.withOpacity(0.1);
+        textColor = Colors.green;
+        displayText = 'Livrée';
+        break;
+      case 'cancelled':
+        backgroundColor = Colors.red.withOpacity(0.1);
+        textColor = Colors.red;
+        displayText = 'Annulée';
+        break;
+      default:
+        backgroundColor = Colors.grey.withOpacity(0.1);
+        textColor = Colors.grey;
+        displayText = 'Inconnu';
+    }
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.getCardBackground(isDark),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.getShadow(isDark),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Column(
+      child: Text(
+        displayText,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: textColor,
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays == 0) {
+      return 'Aujourd\'hui ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    } else if (difference.inDays == 1) {
+      return 'Hier ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays} jours';
+    } else {
+      return '${date.day}/${date.month}/${date.year}';
+    }
+  }
+
+  void _showOrderDetails(Map<String, dynamic> order, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.9,
+        minChildSize: 0.5,
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: AppColors.getCardBackground(isDark),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              // Handle
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.getTextSecondary(isDark),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+
+              // Contenu
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.all(24),
+                  child: _buildOrderDetailsContent(order, isDark),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrderDetailsContent(Map<String, dynamic> order, bool isDark) {
+    final items = _safeGetList(order, 'items');
+    final totalAmount = _safeGetDouble(order, 'total_amount', 0.0);
+    final deliveryFee = _safeGetDouble(order, 'delivery_fee', 0.0);
+    final subtotal = totalAmount - deliveryFee;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Titre
+        Text(
+          'Détails de la commande',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: AppColors.getTextPrimary(isDark),
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // Informations générales
+        _buildDetailSection(
+          'Informations générales',
+          [
+            _buildDetailRow(
+                'ID',
+                '#${_safeGetString(order, 'id', 'N/A').substring(0, 8)}',
+                isDark),
+            _buildDetailRow('Statut',
+                _getStatusText(_safeGetString(order, 'status', '')), isDark),
+            _buildDetailRow(
+                'Date',
+                _formatDate(DateTime.tryParse(
+                        _safeGetString(order, 'created_at', '')) ??
+                    DateTime.now()),
+                isDark),
+            _buildDetailRow(
+                'Adresse',
+                _safeGetString(order, 'delivery_address', 'Non spécifiée'),
+                isDark),
+          ],
+          isDark,
+        ),
+
+        const SizedBox(height: 24),
+
+        // Articles commandés
+        _buildDetailSection(
+          'Articles commandés',
+          items.map((item) => _buildItemRow(item, isDark)).toList(),
+          isDark,
+        ),
+
+        const SizedBox(height: 24),
+
+        // Récapitulatif des prix
+        _buildDetailSection(
+          'Récapitulatif',
+          [
+            _buildDetailRow(
+                'Sous-total', CurrencyUtils.formatPrice(subtotal), isDark),
+            _buildDetailRow('Frais de livraison',
+                CurrencyUtils.formatPrice(deliveryFee), isDark),
+            const Divider(),
+            _buildDetailRow(
+              'Total',
+              CurrencyUtils.formatPrice(totalAmount),
+              isDark,
+              isTotal: true,
+            ),
+          ],
+          isDark,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetailSection(String title, List<Widget> children, bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: AppColors.getTextPrimary(isDark),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.getBackground(isDark),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: AppColors.getBorder(isDark),
+            ),
+          ),
+          child: Column(
+            children: children,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, bool isDark,
+      {bool isTotal = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // En-tête
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: _getOrderStatusColor(orderObj.status).withOpacity(0.1),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(16),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: isTotal ? 16 : 14,
+                fontWeight: isTotal ? FontWeight.w600 : FontWeight.normal,
+                color: AppColors.getTextSecondary(isDark),
               ),
             ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: _getOrderStatusColor(orderObj.status).withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    _getOrderStatusIcon(orderObj.status),
-                    color: _getOrderStatusColor(orderObj.status),
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Commande #${orderObj.id.substring(0, 8)}',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.getTextPrimary(isDark),
-                        ),
-                      ),
-                      if (orderObj.createdAt != null)
-                        Text(
-                          app_date_utils.AppDateUtils.formatDateTime(orderObj.createdAt!),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.getTextSecondary(isDark),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _getOrderStatusColor(orderObj.status),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    _getOrderStatusDisplay(orderObj.status),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
-          
-          // Contenu
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Date de livraison
-                if (orderObj.actualDeliveryTime != null) ...[
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.event,
-                        size: 20,
-                        color: AppColors.getTextSecondary(isDark),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Livrée le: ${app_date_utils.AppDateUtils.formatDateTime(orderObj.actualDeliveryTime!)}',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppColors.getTextPrimary(isDark),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                
-                // Adresse
-                if (orderObj.deliveryAddress != null) ...[
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.location_on,
-                        size: 20,
-                        color: AppColors.getTextSecondary(isDark),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Adresse: ${orderObj.deliveryAddress}',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: AppColors.getTextPrimary(isDark),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                
-                // Montant
-                if (orderObj.totalAmount != null) ...[
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.payments,
-                        size: 20,
-                        color: AppColors.getTextSecondary(isDark),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Montant: ${orderObj.totalAmount!.toStringAsFixed(0)} FCFA',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.getTextPrimary(isDark),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-                
-                // Bouton de détails
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => OrderTrackingPage(
-                            orderId: orderObj.id,
-                          ),
-                        ),
-                      ).then((_) => _loadData());
-                    },
-                    icon: const Icon(Icons.receipt_long, size: 16),
-                    label: const Text('Voir les détails'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.primary,
-                      side: const BorderSide(color: AppColors.primary),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+          const SizedBox(width: 16),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: isTotal ? 16 : 14,
+              fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
+              color: isTotal
+                  ? AppColors.primary
+                  : AppColors.getTextPrimary(isDark),
             ),
           ),
         ],
@@ -700,42 +705,110 @@ class _UserOrdersPageState extends State<UserOrdersPage> with TickerProviderStat
     );
   }
 
-  Color _getOrderStatusColor(String status) {
-    switch (status) {
-      case 'pending': return Colors.grey;
-      case 'confirmed': return Colors.blue;
-      case 'preparing': return Colors.orange;
-      case 'ready_for_pickup': return Colors.amber;
-      case 'out_for_delivery': return Colors.purple;
-      case 'delivered': return Colors.green;
-      case 'cancelled': return Colors.red;
-      default: return Colors.grey;
+  Widget _buildItemRow(Map<String, dynamic> item, bool isDark) {
+    final name = _safeGetString(item, 'name', 'Article inconnu');
+    final quantity = _safeGetInt(item, 'quantity', 1);
+    final price = _safeGetDouble(item, 'price', 0.0);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.getTextPrimary(isDark),
+                  ),
+                ),
+                Text(
+                  'Quantité: $quantity',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.getTextSecondary(isDark),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Text(
+            CurrencyUtils.formatPrice(price * quantity),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColors.getTextPrimary(isDark),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getStatusText(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return 'En attente';
+      case 'confirmed':
+        return 'Confirmée';
+      case 'preparing':
+        return 'En préparation';
+      case 'ready_for_pickup':
+        return 'Prête pour livraison';
+      case 'out_for_delivery':
+        return 'En cours de livraison';
+      case 'delivered':
+        return 'Livrée';
+      case 'cancelled':
+        return 'Annulée';
+      default:
+        return 'Statut inconnu';
     }
   }
 
-  IconData _getOrderStatusIcon(String status) {
-    switch (status) {
-      case 'pending': return Icons.receipt;
-      case 'confirmed': return Icons.check_circle;
-      case 'preparing': return Icons.inventory;
-      case 'ready_for_pickup': return Icons.inventory_2;
-      case 'out_for_delivery': return Icons.delivery_dining;
-      case 'delivered': return Icons.home;
-      case 'cancelled': return Icons.cancel;
-      default: return Icons.help;
-    }
+  // Méthodes utilitaires pour éviter les erreurs de type
+  String _safeGetString(
+      Map<String, dynamic> map, String key, String defaultValue) {
+    final value = map[key];
+    if (value == null) return defaultValue;
+    if (value is String) return value;
+    return value.toString();
   }
 
-  String _getOrderStatusDisplay(String status) {
-    switch (status) {
-      case 'pending': return 'En attente';
-      case 'confirmed': return 'Confirmée';
-      case 'preparing': return 'En préparation';
-      case 'ready_for_pickup': return 'Prête';
-      case 'out_for_delivery': return 'En livraison';
-      case 'delivered': return 'Livrée';
-      case 'cancelled': return 'Annulée';
-      default: return 'Inconnu';
+  double _safeGetDouble(
+      Map<String, dynamic> map, String key, double defaultValue) {
+    final value = map[key];
+    if (value == null) return defaultValue;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? defaultValue;
+    return defaultValue;
+  }
+
+  int _safeGetInt(Map<String, dynamic> map, String key, int defaultValue) {
+    final value = map[key];
+    if (value == null) return defaultValue;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? defaultValue;
+    return defaultValue;
+  }
+
+  List<Map<String, dynamic>> _safeGetList(
+      Map<String, dynamic> map, String key) {
+    final value = map[key];
+    if (value == null) return [];
+    if (value is List) {
+      return value.map((item) {
+        if (item is Map<String, dynamic>) return item;
+        return <String, dynamic>{};
+      }).toList();
     }
+    return [];
   }
 }

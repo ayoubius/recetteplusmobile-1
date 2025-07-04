@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/constants/app_colors.dart';
-import '../../../../core/services/supabase_service.dart';
+import '../../../../core/services/recipe_service.dart';
 import 'recipe_detail_drawer.dart';
 
 class RecipesPage extends StatefulWidget {
@@ -17,6 +17,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
   String _selectedDifficulty = 'Toutes';
   String _sortBy = 'recent'; // recent, popular, rating
   List<Map<String, dynamic>> _recipes = [];
+  List<Map<String, dynamic>> _allRecipes = []; // Pour le filtrage local
   bool _isLoading = true;
   bool _hasError = false;
   String _errorMessage = '';
@@ -75,14 +76,14 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
     });
 
     try {
-      final recipes = await SupabaseService.getRecipes(
+      final recipes = await RecipeService.getRecipes(
         category: _selectedCategory == 'Toutes' ? null : _selectedCategory,
         searchQuery: _searchController.text.trim().isNotEmpty 
             ? _searchController.text.trim() 
             : null,
       );
 
-      _recipes = recipes;
+      _allRecipes = recipes;
 
       // Appliquer les filtres et le tri
       _applyFiltersAndSort();
@@ -106,7 +107,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
   }
 
   void _applyFiltersAndSort() {
-    List<Map<String, dynamic>> filtered = List.from(_recipes);
+    List<Map<String, dynamic>> filtered = List.from(_allRecipes);
 
     // Filtrer par difficulté
     if (_selectedDifficulty != 'Toutes') {
@@ -128,13 +129,13 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
     // Trier
     switch (_sortBy) {
       case 'popular':
-        filtered.sort((a, b) => (b['rating'] ?? 0).compareTo(a['rating'] ?? 0));
+        filtered.sort((a, b) => (b['view_count'] ?? 0).compareTo(a['view_count'] ?? 0));
         break;
       case 'rating':
         filtered.sort((a, b) => (b['rating'] ?? 0).compareTo(a['rating'] ?? 0));
         break;
       case 'time':
-        filtered.sort((a, b) => (a['cook_time'] ?? 0).compareTo(b['cook_time'] ?? 0));
+        filtered.sort((a, b) => (a['total_time'] ?? 0).compareTo(b['total_time'] ?? 0));
         break;
       case 'recent':
       default:
@@ -153,9 +154,9 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
 
   Future<void> _addToFavorites(Map<String, dynamic> recipe) async {
     try {
-      await SupabaseService.addToFavorites(recipe['id'], 'recipe');
+      final success = await RecipeService.addToFavorites(recipe['id']);
       
-      if (mounted) {
+      if (mounted && success) {
         HapticFeedback.lightImpact();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -188,7 +189,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
     HapticFeedback.mediumImpact();
     
     // Ajouter à l'historique
-    SupabaseService.addToHistory(recipe['id']);
+    RecipeService.addToHistory(recipe['id']);
     
     // Ouvrir le drawer de détails
     showModalBottomSheet(
@@ -228,7 +229,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
         actions: [
           // Bouton de tri
           PopupMenuButton<String>(
-            icon: const Icon(Icons.sort),
+            icon: const Icon(Icons.sort, color: Colors.white),
             onSelected: (value) {
               setState(() {
                 _sortBy = value;
@@ -257,7 +258,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
             onPressed: _showFilterModal,
             icon: Stack(
               children: [
-                const Icon(Icons.tune),
+                const Icon(Icons.tune, color: Colors.white),
                 if (_selectedDifficulty != 'Toutes')
                   Positioned(
                     right: 0,
@@ -266,7 +267,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                       width: 8,
                       height: 8,
                       decoration: const BoxDecoration(
-                        color: Colors.red,
+                        color: AppColors.accent,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -287,6 +288,13 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: TextField(
                     controller: _searchController,
@@ -314,7 +322,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                 ),
                 const SizedBox(height: 16),
                 
-                // Filtres par catégorie
+                // Filtres par catégorie - TEXTE TOUJOURS VISIBLE
                 SizedBox(
                   height: 40,
                   child: ListView.builder(
@@ -327,7 +335,16 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                       return Container(
                         margin: const EdgeInsets.only(right: 12),
                         child: FilterChip(
-                          label: Text(category),
+                          label: Text(
+                            category,
+                            style: TextStyle(
+                              // SOLUTION DÉFINITIVE pour la visibilité du texte
+                              color: isSelected 
+                                  ? AppColors.primary  // Orange sur fond blanc (excellent contraste)
+                                  : Colors.white,      // Blanc sur fond transparent/coloré
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                            ),
+                          ),
                           selected: isSelected,
                           onSelected: (selected) {
                             setState(() {
@@ -335,18 +352,14 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                             });
                             _loadRecipes();
                           },
-                          backgroundColor: Colors.white.withOpacity(0.2),
+                          backgroundColor: Colors.white.withOpacity(0.15),
                           selectedColor: Colors.white,
-                          labelStyle: TextStyle(
-                            color: isSelected ? AppColors.primary : Colors.white,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                          ),
                           side: BorderSide(
-                            color: isSelected ? Colors.white : Colors.white.withOpacity(0.5),
+                            color: isSelected ? Colors.white : Colors.white.withOpacity(0.4),
                             width: isSelected ? 2 : 1,
                           ),
-                          elevation: isSelected ? 2 : 0,
-                          shadowColor: Colors.black.withOpacity(0.3),
+                          elevation: isSelected ? 3 : 1,
+                          shadowColor: Colors.black.withOpacity(0.2),
                         ),
                       );
                     },
@@ -358,7 +371,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : _hasError
               ? _buildErrorState(isDark)
               : _recipes.isEmpty
@@ -367,6 +380,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                       opacity: _fadeAnimation,
                       child: RefreshIndicator(
                         onRefresh: _loadRecipes,
+                        color: AppColors.primary,
                         child: ListView.builder(
                           padding: const EdgeInsets.all(20),
                           itemCount: _recipes.length,
@@ -387,6 +401,13 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
       decoration: BoxDecoration(
         color: AppColors.getCardBackground(isDark),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.getShadow(isDark),
+            blurRadius: 20,
+            offset: const Offset(0, -5),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -416,12 +437,15 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
             const SizedBox(height: 20),
             
             // Difficulté
-            Text(
-              'Difficulté',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.getTextPrimary(isDark),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Difficulté',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.getTextPrimary(isDark),
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -432,7 +456,16 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
               children: _difficulties.map((difficulty) {
                 final isSelected = difficulty == _selectedDifficulty;
                 return FilterChip(
-                  label: Text(difficulty),
+                  label: Text(
+                    difficulty,
+                    style: TextStyle(
+                      // TEXTE TOUJOURS VISIBLE - contraste parfait
+                      color: isSelected 
+                          ? Colors.white  // Blanc sur fond orange
+                          : AppColors.getTextPrimary(isDark), // Couleur adaptée au thème
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                  ),
                   selected: isSelected,
                   onSelected: (selected) {
                     setState(() {
@@ -441,15 +474,13 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     _applyFiltersAndSort();
                   },
                   backgroundColor: AppColors.getBackground(isDark),
-                  selectedColor: AppColors.primary.withOpacity(0.2),
-                  labelStyle: TextStyle(
-                    color: isSelected ? AppColors.primary : AppColors.getTextSecondary(isDark),
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                  ),
+                  selectedColor: AppColors.primary, // Fond orange quand sélectionné
                   side: BorderSide(
                     color: isSelected ? AppColors.primary : AppColors.getBorder(isDark),
                     width: isSelected ? 2 : 1,
                   ),
+                  elevation: isSelected ? 2 : 0,
+                  shadowColor: AppColors.getShadow(isDark),
                 );
               }).toList(),
             ),
@@ -468,6 +499,11 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                       _applyFiltersAndSort();
                       Navigator.pop(context);
                     },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.getTextPrimary(isDark),
+                      side: BorderSide(color: AppColors.getBorder(isDark)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
                     child: const Text('Réinitialiser'),
                   ),
                 ),
@@ -478,6 +514,8 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      elevation: 2,
                     ),
                     child: const Text('Appliquer'),
                   ),
@@ -790,7 +828,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                         children: [
                           const Icon(
                             Icons.star,
-                            color: Colors.amber,
+                            color: AppColors.accent,
                             size: 16,
                           ),
                           const SizedBox(width: 4),
@@ -827,7 +865,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                   ),
                   const SizedBox(height: 8),
                   
-                  if (recipe['description'] != null)
+                  if (recipe['description'] != null && recipe['description'].toString().isNotEmpty)
                     Text(
                       recipe['description'],
                       style: TextStyle(
@@ -844,10 +882,10 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                   // Informations détaillées
                   Row(
                     children: [
-                      if (recipe['cook_time'] != null)
+                      if (recipe['total_time'] != null)
                         _buildInfoChip(
                           Icons.access_time,
-                          '${recipe['cook_time']} min',
+                          recipe['formatted_time'] ?? '${recipe['total_time']} min',
                           isDark,
                         ),
                       const SizedBox(width: 8),
@@ -863,7 +901,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: Colors.green,
+                            color: AppColors.success,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: const Text(
@@ -922,13 +960,13 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
   Color _getDifficultyColor(String difficulty) {
     switch (difficulty.toLowerCase()) {
       case 'facile':
-        return Colors.green;
+        return AppColors.success;
       case 'moyen':
-        return Colors.orange;
+        return AppColors.warning;
       case 'difficile':
-        return Colors.red;
+        return AppColors.error;
       default:
-        return Colors.grey;
+        return AppColors.textSecondary;
     }
   }
 

@@ -48,13 +48,13 @@ class _DeliveryPersonDashboardState extends State<DeliveryPersonDashboard> {
     }
 
     try {
-      // Charger le profil du livreur
+      // Charger le profil du livreur depuis le service
       final deliveryPerson = await DeliveryService.getCurrentDeliveryPersonProfile();
       
-      // Charger les commandes assignées
+      // Charger les commandes assignées depuis le service
       final assignedOrders = await DeliveryService.getAssignedOrders();
       
-      // Charger l'historique des livraisons
+      // Charger l'historique des livraisons depuis le service
       final deliveryHistory = await DeliveryService.getDeliveryHistory();
       
       if (mounted) {
@@ -217,7 +217,7 @@ class _DeliveryPersonDashboardState extends State<DeliveryPersonDashboard> {
                       // Statut du livreur
                       _buildStatusCard(isDark),
                       
-                      // Onglets
+                      // Onglets améliorés
                       _buildTabs(isDark),
                       
                       // Contenu selon l'onglet sélectionné
@@ -347,17 +347,17 @@ class _DeliveryPersonDashboardState extends State<DeliveryPersonDashboard> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: _getStatusColor(_deliveryPerson!.currentStatus).withOpacity(0.2),
+                  color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: _getStatusColor(_deliveryPerson!.currentStatus),
+                    color: Colors.white,
                     width: 1,
                   ),
                 ),
                 child: Text(
                   _getStatusDisplay(_deliveryPerson!.currentStatus),
-                  style: TextStyle(
-                    color: _getStatusColor(_deliveryPerson!.currentStatus),
+                  style: const TextStyle(
+                    color: Colors.white,
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),
@@ -548,32 +548,39 @@ class _DeliveryPersonDashboardState extends State<DeliveryPersonDashboard> {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: isSelected ? AppColors.primary : Colors.transparent,
-              width: 3,
-            ),
-          ),
+          color: isSelected 
+              ? AppColors.primary.withOpacity(0.1) 
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: isSelected 
+              ? Border.all(color: AppColors.primary, width: 2)
+              : null,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected 
-                    ? AppColors.primary 
-                    : AppColors.getTextSecondary(isDark),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  color: isSelected 
+                      ? AppColors.primary 
+                      : AppColors.getTextSecondary(isDark),
+                ),
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
             if (count != null && count > 0) ...[
               const SizedBox(width: 8),
-              Container(
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: isSelected ? AppColors.primary : Colors.grey,
@@ -684,7 +691,6 @@ class _DeliveryPersonDashboardState extends State<DeliveryPersonDashboard> {
   Widget _buildOrderCard(Map<String, dynamic> order, bool isDark) {
     final orderObj = Order.fromJson(order);
     final profile = order['profiles'] as Map<String, dynamic>?;
-    final tracking = order['order_tracking'] as List?;
     
     return Container(
       margin: const EdgeInsets.only(bottom: 16),

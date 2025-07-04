@@ -1,67 +1,67 @@
 class CurrencyUtils {
   /// Formate un prix en FCFA
-  /// Les prix dans la base de données sont déjà en FCFA
   static String formatPrice(double price) {
     if (price == 0) return '0 FCFA';
-    
+
     // Arrondir à l'entier le plus proche
     final roundedPrice = price.round();
-    
+
     // Formater avec des espaces pour les milliers
-    final formattedNumber = _formatNumberWithSpaces(roundedPrice);
-    
-    return '$formattedNumber FCFA';
+    final priceString = roundedPrice.toString();
+    final buffer = StringBuffer();
+
+    for (int i = 0; i < priceString.length; i++) {
+      if (i > 0 && (priceString.length - i) % 3 == 0) {
+        buffer.write(' ');
+      }
+      buffer.write(priceString[i]);
+    }
+
+    return '${buffer.toString()} FCFA';
   }
 
-  /// Formate un nombre avec des espaces comme séparateurs de milliers
-  static String _formatNumberWithSpaces(int number) {
-    final numberString = number.toString();
-    final length = numberString.length;
-    
-    if (length <= 3) {
-      return numberString;
+  /// Formate un prix avec décimales si nécessaire
+  static String formatPriceWithDecimals(double price) {
+    if (price == 0) return '0 FCFA';
+
+    // Si le prix est un entier, ne pas afficher les décimales
+    if (price == price.roundToDouble()) {
+      return formatPrice(price);
     }
-    
-    String result = '';
-    for (int i = 0; i < length; i++) {
-      if (i > 0 && (length - i) % 3 == 0) {
-        result += ' ';
-      }
-      result += numberString[i];
-    }
-    
-    return result;
+
+    // Sinon, afficher avec 2 décimales maximum
+    final formattedPrice = price.toStringAsFixed(2);
+    return '$formattedPrice FCFA';
   }
 
   /// Parse un prix depuis une chaîne
   static double parsePrice(String priceString) {
-    // Supprimer 'FCFA' et les espaces
-    final cleanString = priceString
-        .replaceAll('FCFA', '')
-        .replaceAll(' ', '')
-        .trim();
-    
-    return double.tryParse(cleanString) ?? 0.0;
+    try {
+      // Supprimer "FCFA" et les espaces
+      final cleanString =
+          priceString.replaceAll('FCFA', '').replaceAll(' ', '').trim();
+
+      return double.parse(cleanString);
+    } catch (e) {
+      return 0.0;
+    }
   }
 
-  /// Calcule le total d'une liste de prix
-  static double calculateTotal(List<double> prices) {
-    return prices.fold(0.0, (sum, price) => sum + price);
+  /// Calcule une remise
+  static double calculateDiscount(
+      double originalPrice, double discountPercent) {
+    return originalPrice * (discountPercent / 100);
   }
 
-  /// Formate un prix avec une devise personnalisée
-  static String formatPriceWithCurrency(double price, String currency) {
-    final roundedPrice = price.round();
-    final formattedNumber = _formatNumberWithSpaces(roundedPrice);
-    return '$formattedNumber $currency';
+  /// Calcule le prix après remise
+  static double applyDiscount(double originalPrice, double discountPercent) {
+    final discount = calculateDiscount(originalPrice, discountPercent);
+    return originalPrice - discount;
   }
 
-  /// Constantes pour les frais
-  static const double deliveryFee = 2000.0; // 2000 FCFA
-  static const double serviceFee = 500.0;   // 500 FCFA
-  
-  /// Calcule le total avec les frais
-  static double calculateTotalWithFees(double subtotal) {
-    return subtotal + deliveryFee;
+  /// Formate un pourcentage de remise
+  static String formatDiscount(double discountPercent) {
+    if (discountPercent == 0) return '';
+    return '-${discountPercent.toStringAsFixed(0)}%';
   }
 }

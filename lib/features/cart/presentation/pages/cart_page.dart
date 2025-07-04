@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/services/cart_service.dart';
 import '../../../../core/services/delivery_service.dart';
 import '../../../../core/services/location_service.dart';
+import '../../../../core/services/geocoding_service.dart';
 import '../../../../core/utils/currency_utils.dart';
+import 'dart:async';
 
 class CartPage extends StatefulWidget {
   const CartPage({super.key});
@@ -16,23 +19,11 @@ class CartPage extends StatefulWidget {
 
 class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
   List<Map<String, dynamic>> _cartItems = [];
-  List<Map<String, dynamic>> _expandedCartDetails = [];
   bool _isLoading = true;
-  bool _hasError = false;
-  String _errorMessage = '';
-  double _total = 0.0;
+  bool _isProcessingOrder = false;
+  double _subtotal = 0.0;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
-
-  // Adresse de livraison
-  final TextEditingController _addressController = TextEditingController();
-  String? _selectedZoneId;
-  List<Map<String, dynamic>> _deliveryZones = [];
-  bool _isPlacingOrder = false;
-  bool _isGettingLocation = false;
-
-  // État d'expansion des paniers
-  final Set<String> _expandedCarts = {};
 
   @override
   void initState() {
@@ -44,422 +35,113 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
-    _loadCartItems();
-    _loadDeliveryZones();
+
+    _loadCartData();
   }
 
   @override
   void dispose() {
     _animationController.dispose();
-    _addressController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadCartItems() async {
-    setState(() {
-      _isLoading = true;
-      _hasError = false;
-      _errorMessage = '';
-    });
-
-    try {
-      final items = await CartService.getMainCartItems();
-      final total = await CartService.calculateMainCartTotal();
-
-      // Charger les détails des paniers
-      await _loadCartDetails(items);
-
-      if (mounted) {
-        setState(() {
-          _cartItems = items;
-          _total = total;
-          _isLoading = false;
-        });
-        _animationController.forward();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _hasError = true;
-          _errorMessage = e.toString();
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _loadCartDetails(List<Map<String, dynamic>> cartItems) async {
-    List<Map<String, dynamic>> details = [];
-
-    for (var item in cartItems) {
-      final cartType = item['cart_reference_type'] ?? '';
-      final cartId = item['cart_reference_id'];
-
-      if (cartId != null) {
-        try {
-          List<Map<String, dynamic>> itemDetails = [];
-
-          if (cartType == 'personal') {
-            // Charger les détails du panier personnel
-            final personalItems =
-                await CartService.getPersonalCartItems(cartId);
-            itemDetails = personalItems;
-          } else if (cartType == 'recipe') {
-            // Charger les détails du panier recette
-            final recipeItems = await CartService.getRecipeCartItems(cartId);
-            itemDetails = recipeItems;
-          } else if (cartType == 'preconfigured') {
-            // Charger les détails du panier préconfiguré
-            final preconfiguredItems =
-                await CartService.getPreconfiguredCartItems(cartId);
-            itemDetails = preconfiguredItems;
-          }
-
-          details.add({
-            'cart_id': cartId,
-            'cart_type': cartType,
-            'items': itemDetails,
-          });
-        } catch (e) {
-          print('Erreur chargement détails panier $cartId: $e');
-        }
-      }
-    }
-
-    setState(() {
-      _expandedCartDetails = details;
-    });
-  }
-
-  Future<void> _loadDeliveryZones() async {
-    try {
-      final zones = await DeliveryService.getActiveDeliveryZones();
-      if (mounted) {
-        setState(() {
-          _deliveryZones = zones.map((zone) => zone.toJson()).toList();
-          if (_deliveryZones.isNotEmpty) {
-            _selectedZoneId = _deliveryZones.first['id'];
-          }
-        });
-      }
-    } catch (e) {
-      // Erreur silencieuse pour ne pas bloquer le chargement du panier
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur de chargement des zones de livraison: $e'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    }
-  }
-
-  // Fonction utilitaire pour convertir en double de manière sécurisée
-  double _safeToDouble(dynamic value) {
-    if (value == null) return 0.0;
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is String) {
-      return double.tryParse(value) ?? 0.0;
-    }
-    return 0.0;
-  }
-
-  // Fonction utilitaire pour convertir en int de manière sécurisée
-  int _safeToInt(dynamic value) {
-    if (value == null) return 0;
-    if (value is int) return value;
-    if (value is double) return value.toInt();
-    if (value is String) {
-      return int.tryParse(value) ?? 0;
-    }
-    return 0;
-  }
-
-  Future<void> _removeItem(int index) async {
-    HapticFeedback.mediumImpact();
-
-    final removedItem = _cartItems[index];
-
-    try {
-      // Supprimer de la base de données si c'est un vrai item
-      if (removedItem['id'] != null &&
-          removedItem['id'] is String &&
-          removedItem['id'].length > 5) {
-        await CartService.removeFromMainCart(removedItem['id']);
-      }
-
+  Future<void> _loadCartData({bool silent = false}) async {
+    if (!silent) {
       setState(() {
-        _cartItems.removeAt(index);
-        _total -= _safeToDouble(removedItem['cart_total_price']);
+        _isLoading = true;
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${removedItem['cart_name']} supprimé du panier'),
-          backgroundColor: AppColors.error,
-          action: SnackBarAction(
-            label: 'Annuler',
-            textColor: Colors.white,
-            onPressed: () {
-              setState(() {
-                _cartItems.insert(index, removedItem);
-                _total += _safeToDouble(removedItem['cart_total_price']);
-              });
-            },
-          ),
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erreur lors de la suppression: $e'),
-          backgroundColor: AppColors.error,
-        ),
-      );
     }
-  }
-
-  Future<void> _updateProductQuantity(
-      String cartId, String productId, int newQuantity) async {
-    if (newQuantity <= 0) {
-      _removeProductFromCart(cartId, productId);
-      return;
-    }
-
-    HapticFeedback.lightImpact();
 
     try {
-      await CartService.updateProductQuantity(
-        cartId: cartId,
-        productId: productId,
-        quantity: newQuantity,
-      );
-
-      // Recharger les paniers pour refléter les changements
-      _loadCartItems();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erreur lors de la mise à jour: $e'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-    }
-  }
-
-  Future<void> _removeProductFromCart(String cartId, String productId) async {
-    HapticFeedback.mediumImpact();
-
-    try {
-      await CartService.removeProductFromCart(
-        cartId: cartId,
-        productId: productId,
-      );
-
-      // Recharger les paniers pour refléter les changements
-      _loadCartItems();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erreur lors de la suppression: $e'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-    }
-  }
-
-  void _toggleCartExpansion(String cartId) {
-    setState(() {
-      if (_expandedCarts.contains(cartId)) {
-        _expandedCarts.remove(cartId);
-      } else {
-        _expandedCarts.add(cartId);
-      }
-    });
-  }
-
-  void _proceedToCheckout() {
-    HapticFeedback.mediumImpact();
-
-    if (_cartItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Votre panier est vide'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _buildCheckoutBottomSheet(),
-    );
-  }
-
-  Future<void> _getCurrentLocation() async {
-    setState(() {
-      _isGettingLocation = true;
-    });
-
-    try {
-      // Vérifier les permissions
-      final hasPermission =
-          await LocationService.checkAndRequestLocationPermission();
-      if (!hasPermission) {
-        if (mounted) {
-          final shouldOpenSettings =
-              await LocationService.showLocationPermissionDialog(context);
-          if (shouldOpenSettings) {
-            await LocationService.openAppSettings();
-          }
-        }
-        setState(() {
-          _isGettingLocation = false;
-        });
-        return;
+      if (kDebugMode) {
+        print('🔄 Chargement des données du panier...');
       }
 
-      // Obtenir la position actuelle
-      final position = await LocationService.getCurrentPosition();
-      if (position != null) {
-        // Obtenir l'adresse à partir des coordonnées
-        final address = await LocationService.getAddressFromCoordinates(
-            position.latitude, position.longitude);
+      // Récupérer les items du panier depuis la base de données
+      final cartItems = await CartService.getMainCartItems();
+      double subtotal = 0.0;
 
-        if (mounted && address != null) {
-          setState(() {
-            _addressController.text = address;
-          });
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                  "Impossible d'obtenir la position. Activez le GPS ou saisissez l'adresse manuellement."),
-              backgroundColor: Colors.red,
-            ),
-          );
+      if (kDebugMode) {
+        print('📦 ${cartItems.length} items trouvés dans le panier');
+      }
+
+      // Calculer correctement le sous-total
+      for (final item in cartItems) {
+        final itemTotal = (item['cart_total_price'] as num?)?.toDouble() ?? 0.0;
+        subtotal += itemTotal;
+
+        if (kDebugMode) {
+          print('💰 Item: ${item['cart_name']} - Prix: $itemTotal FCFA');
         }
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
+
       if (mounted) {
         setState(() {
-          _isGettingLocation = false;
+          _cartItems = cartItems;
+          _subtotal = subtotal;
+          _isLoading = false;
         });
+
+        if (!silent) {
+          _animationController.forward();
+        }
+
+        if (kDebugMode) {
+          print(
+              '✅ Panier chargé: ${cartItems.length} items, Total: $subtotal FCFA');
+        }
       }
-    }
-  }
-
-  Future<void> _placeOrder() async {
-    if (_addressController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Veuillez entrer une adresse de livraison'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    if (_selectedZoneId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Veuillez sélectionner une zone de livraison'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _isPlacingOrder = true;
-    });
-
-    try {
-      // Préparer les items pour la commande
-      final items = _cartItems.map((item) {
-        return {
-          'name': item['cart_name'],
-          'quantity': _safeToInt(item['items_count']),
-          'price': _safeToDouble(item['unit_price']),
-          'total': _safeToDouble(item['cart_total_price']),
-          'type': item['cart_reference_type'] ?? 'product',
-          'reference_id': item['cart_reference_id'] ?? item['id'],
-        };
-      }).toList();
-
-      // Créer la commande
-      final userId = await _getUserId();
-      if (userId == null) {
-        throw Exception('Utilisateur non connecté');
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors du chargement du panier: $e');
       }
 
-      // Obtenir la position actuelle si disponible
-      final position = await LocationService.getCurrentPosition();
-      Map<String, dynamic>? locationData;
+      if (mounted) {
+        setState(() {
+          _cartItems = [];
+          _subtotal = 0.0;
+          _isLoading = false;
+        });
 
-      if (position != null) {
-        locationData = {
-          'delivery_latitude': position.latitude,
-          'delivery_longitude': position.longitude,
-        };
-      }
-
-      final order = await DeliveryService.createOrderWithDelivery(
-        userId: userId,
-        totalAmount: _total + CurrencyUtils.deliveryFee,
-        items: items,
-        deliveryAddress: _addressController.text.trim(),
-        deliveryZoneId: _selectedZoneId!,
-        deliveryNotes: 'Commande passée via l\'application mobile',
-        additionalData: locationData,
-      );
-
-      if (order != null) {
-        // Vider le panier après commande réussie
-        await CartService.clearMainCart();
-
-        if (mounted) {
-          // Fermer la modal
-          Navigator.pop(context);
-
-          // Afficher un message de succès
+        if (!silent) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content:
-                  Text('Commande #${order.id.substring(0, 8)} confirmée !'),
-              backgroundColor: AppColors.success,
-              duration: const Duration(seconds: 5),
+              content: Text('Erreur lors du chargement du panier: $e'),
+              backgroundColor: AppColors.error,
               action: SnackBarAction(
-                label: 'Voir',
-                textColor: Colors.white,
-                onPressed: () {
-                  // TODO: Naviguer vers la page de détail de la commande
-                },
+                label: 'Réessayer',
+                onPressed: () => _loadCartData(),
               ),
             ),
           );
-
-          // Recharger le panier (qui sera vide)
-          _loadCartItems();
         }
       }
+    }
+  }
+
+  Future<void> _removeFromCart(String itemId) async {
+    try {
+      if (kDebugMode) {
+        print('🗑️ Suppression de l\'item: $itemId');
+      }
+
+      await CartService.removeFromMainCart(itemId);
+      await _loadCartData();
+
+      if (mounted) {
+        HapticFeedback.lightImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Article supprimé du panier'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
     } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur suppression item: $e');
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -468,37 +150,87 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
           ),
         );
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isPlacingOrder = false;
-        });
+    }
+  }
+
+  Future<void> _clearCart() async {
+    final shouldClear = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Vider le panier'),
+        content: const Text('Êtes-vous sûr de vouloir vider votre panier ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Vider'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldClear == true) {
+      try {
+        if (kDebugMode) {
+          print('🧹 Vidage du panier...');
+        }
+
+        await CartService.clearMainCart();
+        await _loadCartData();
+
+        if (mounted) {
+          HapticFeedback.mediumImpact();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Panier vidé avec succès'),
+              backgroundColor: AppColors.success,
+            ),
+          );
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('❌ Erreur vidage panier: $e');
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erreur: $e'),
+              backgroundColor: AppColors.error,
+            ),
+          );
+        }
       }
     }
   }
 
-  Future<String?> _getUserId() async {
-    try {
-      final user = Supabase.instance.client.auth.currentUser;
-      return user?.id;
-    } catch (e) {
-      return null;
-    }
+  void _showCheckoutDrawer() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => CheckoutDrawer(
+        subtotal: _subtotal,
+        cartItems: _cartItems,
+        onOrderCompleted: () {
+          Navigator.pop(context);
+          _loadCartData();
+        },
+      ),
+    );
   }
 
-  // Fonction pour actualiser le panier
-  Future<void> _refreshCart() async {
-    await _loadCartItems();
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Panier actualisé'),
-          duration: Duration(seconds: 1),
-          backgroundColor: AppColors.primary,
-        ),
-      );
-    }
+  void _showCartItemDetails(Map<String, dynamic> cartItem) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => CartItemDetailsDrawer(cartItem: cartItem),
+    );
   }
 
   @override
@@ -508,167 +240,95 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
     return Scaffold(
       backgroundColor: AppColors.getBackground(isDark),
       appBar: AppBar(
-        title: const Text('Mon Panier'),
+        title: Text(
+            'Mon Panier${_cartItems.isNotEmpty ? ' (${_cartItems.length})' : ''}'),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
-          // Bouton d'actualisation
-          IconButton(
-            onPressed: _refreshCart,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Actualiser le panier',
-          ),
           if (_cartItems.isNotEmpty)
             IconButton(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    backgroundColor: AppColors.getCardBackground(isDark),
-                    title: Text(
-                      'Vider le panier',
-                      style: TextStyle(color: AppColors.getTextPrimary(isDark)),
-                    ),
-                    content: Text(
-                      'Êtes-vous sûr de vouloir vider votre panier ?',
-                      style:
-                          TextStyle(color: AppColors.getTextSecondary(isDark)),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: Text(
-                          'Annuler',
-                          style: TextStyle(
-                              color: AppColors.getTextSecondary(isDark)),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          Navigator.pop(context);
-                          try {
-                            await CartService.clearMainCart();
-                            setState(() {
-                              _cartItems.clear();
-                              _expandedCartDetails.clear();
-                              _total = 0.0;
-                            });
-                            HapticFeedback.mediumImpact();
-                          } catch (e) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Erreur: $e'),
-                                backgroundColor: AppColors.error,
-                              ),
-                            );
-                          }
-                        },
-                        child: const Text('Vider',
-                            style: TextStyle(color: Colors.red)),
-                      ),
-                    ],
-                  ),
-                );
-              },
-              icon: const Icon(Icons.delete_sweep),
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _clearCart,
+              tooltip: 'Vider le panier',
             ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => _loadCartData(),
+            tooltip: 'Actualiser',
+          ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _refreshCart,
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _hasError
-                ? _buildErrorState(isDark)
-                : _cartItems.isEmpty
-                    ? _buildEmptyCart(isDark)
-                    : FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: Column(
+      body: _isLoading
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Chargement du panier...'),
+                ],
+              ),
+            )
+          : _cartItems.isEmpty
+              ? _buildEmptyCart(isDark)
+              : FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: Column(
+                    children: [
+                      // Informations du panier
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        color: AppColors.primary.withOpacity(0.1),
+                        child: Row(
                           children: [
-                            // Header avec résumé
-                            _buildCartHeader(isDark),
-
-                            // Liste des articles
+                            Icon(
+                              Icons.shopping_cart,
+                              color: AppColors.primary,
+                            ),
+                            const SizedBox(width: 12),
                             Expanded(
-                              child: ListView.builder(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 16),
-                                itemCount: _cartItems.length,
-                                itemBuilder: (context, index) {
-                                  final item = _cartItems[index];
-                                  return _buildCartItem(item, index, isDark);
-                                },
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${_cartItems.length} panier${_cartItems.length > 1 ? 's' : ''} dans votre commande',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.getTextPrimary(isDark),
+                                    ),
+                                  ),
+                                  Text(
+                                    'Total: ${CurrencyUtils.formatPrice(_subtotal)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.getTextSecondary(isDark),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-
-                            // Bouton de commande
-                            _buildCheckoutButton(isDark),
                           ],
                         ),
                       ),
-      ),
-    );
-  }
 
-  Widget _buildErrorState(bool isDark) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(
-              color: AppColors.error.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.error_outline,
-              size: 60,
-              color: AppColors.error.withOpacity(0.6),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Erreur de chargement',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: AppColors.getTextPrimary(isDark),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(
-              _errorMessage.isNotEmpty
-                  ? _errorMessage
-                  : 'Impossible de charger votre panier. Veuillez vérifier votre connexion.',
-              style: TextStyle(
-                fontSize: 16,
-                color: AppColors.getTextSecondary(isDark),
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 32),
-          ElevatedButton.icon(
-            onPressed: _loadCartItems,
-            icon: const Icon(Icons.refresh),
-            label: const Text('Réessayer'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(25),
-              ),
-            ),
-          ),
-        ],
-      ),
+                      // Liste des articles
+                      Expanded(
+                        child: ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _cartItems.length,
+                          itemBuilder: (context, index) {
+                            final item = _cartItems[index];
+                            return _buildCartItem(item, isDark, index);
+                          },
+                        ),
+                      ),
+
+                      // Résumé et bouton de commande
+                      _buildCartSummary(isDark),
+                    ],
+                  ),
+                ),
     );
   }
 
@@ -677,18 +337,10 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.shopping_cart_outlined,
-              size: 60,
-              color: AppColors.primary.withOpacity(0.6),
-            ),
+          Icon(
+            Icons.shopping_cart_outlined,
+            size: 120,
+            color: AppColors.getTextSecondary(isDark),
           ),
           const SizedBox(height: 24),
           Text(
@@ -699,29 +351,26 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
               color: AppColors.getTextPrimary(isDark),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 16),
           Text(
-            'Découvrez nos produits et ajoutez-les à votre panier',
+            'Découvrez nos délicieuses recettes et\najoutez des ingrédients à votre panier',
+            textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 16,
               color: AppColors.getTextSecondary(isDark),
             ),
-            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 32),
           ElevatedButton.icon(
-            onPressed: () {
-              // Naviguer vers la page produits
-              Navigator.of(context).pushReplacementNamed('/products');
-            },
-            icon: const Icon(Icons.shopping_bag),
-            label: const Text('Découvrir les produits'),
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.restaurant_menu),
+            label: const Text('Découvrir les recettes'),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(25),
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
           ),
@@ -730,225 +379,139 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildCartHeader(bool isDark) {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [AppColors.primary, AppColors.primary.withOpacity(0.8)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.3),
-            blurRadius: 15,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.shopping_cart,
-              color: Colors.white,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${_cartItems.length} article${_cartItems.length > 1 ? 's' : ''}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  'Total: ${CurrencyUtils.formatPrice(_total)}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildCartItem(Map<String, dynamic> item, bool isDark, int index) {
+    final products = item['products'] as List<dynamic>? ?? [];
+    final hasProducts = products.isNotEmpty;
+    final cartName = item['cart_name'] ?? 'Panier ${index + 1}';
+    final itemsCount = item['items_count'] ?? 0;
+    final totalPrice = (item['cart_total_price'] as num?)?.toDouble() ?? 0.0;
 
-  Widget _buildCartItem(Map<String, dynamic> item, int index, bool isDark) {
-    // Déterminer le type de panier
-    final cartType = item['cart_reference_type'] ?? 'product';
-    final cartId = item['cart_reference_id'] ?? '';
-    final isExpanded = _expandedCarts.contains(cartId);
-
-    IconData cartIcon;
-    Color cartIconColor;
-
-    switch (cartType) {
-      case 'personal':
-        cartIcon = Icons.shopping_bag;
-        cartIconColor = Colors.blue;
-        break;
-      case 'recipe':
-        cartIcon = Icons.restaurant_menu;
-        cartIconColor = Colors.green;
-        break;
-      case 'preconfigured':
-        cartIcon = Icons.shopping_basket;
-        cartIconColor = Colors.purple;
-        break;
-      default:
-        cartIcon = Icons.shopping_cart;
-        cartIconColor = AppColors.primary;
+    // Obtenir l'image du premier produit ou une image par défaut
+    String? imageUrl;
+    if (hasProducts && products.first['image'] != null) {
+      imageUrl = products.first['image'];
     }
 
-    // Trouver les détails du panier
-    final cartDetails = _expandedCartDetails.firstWhere(
-      (detail) => detail['cart_id'] == cartId,
-      orElse: () => {'items': []},
-    );
-
-    final cartItems = cartDetails['items'] as List<dynamic>? ?? [];
-
-    return Column(
-      children: [
-        // En-tête du panier
-        Container(
-          margin: EdgeInsets.only(bottom: isExpanded ? 0 : 16),
-          decoration: BoxDecoration(
-            color: AppColors.getCardBackground(isDark),
-            borderRadius: BorderRadius.vertical(
-              top: const Radius.circular(20),
-              bottom: isExpanded ? Radius.zero : const Radius.circular(20),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.getShadow(isDark),
-                blurRadius: 15,
-                offset: const Offset(0, 5),
-              ),
-            ],
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: AppColors.getCardBackground(isDark),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.getShadow(isDark),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
-          child: InkWell(
-            onTap: () => _toggleCartExpansion(cartId),
-            borderRadius: BorderRadius.vertical(
-              top: const Radius.circular(20),
-              bottom: isExpanded ? Radius.zero : const Radius.circular(20),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
+        ],
+      ),
+      child: InkWell(
+        onTap: hasProducts ? () => _showCartItemDetails(item) : null,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // En-tête du panier
+              Row(
                 children: [
-                  // Icône du type de panier
+                  // Image
                   Container(
-                    width: 60,
-                    height: 60,
+                    width: 80,
+                    height: 80,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      color: cartIconColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      color: AppColors.primary.withOpacity(0.1),
                     ),
-                    child: item['image'] != null
+                    child: imageUrl != null
                         ? ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(12),
                             child: Image.network(
-                              item['image'],
+                              imageUrl,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) {
                                 return Icon(
-                                  cartIcon,
-                                  color: cartIconColor,
-                                  size: 30,
+                                  Icons.shopping_basket,
+                                  color: AppColors.primary,
+                                  size: 32,
+                                );
+                              },
+                              loadingBuilder:
+                                  (context, child, loadingProgress) {
+                                if (loadingProgress == null) return child;
+                                return Center(
+                                  child: CircularProgressIndicator(
+                                    value: loadingProgress.expectedTotalBytes !=
+                                            null
+                                        ? loadingProgress
+                                                .cumulativeBytesLoaded /
+                                            loadingProgress.expectedTotalBytes!
+                                        : null,
+                                    strokeWidth: 2,
+                                  ),
                                 );
                               },
                             ),
                           )
                         : Icon(
-                            cartIcon,
-                            color: cartIconColor,
-                            size: 30,
+                            _getCartTypeIcon(item['cart_reference_type']),
+                            color: AppColors.primary,
+                            size: 32,
                           ),
                   ),
 
                   const SizedBox(width: 16),
 
-                  // Informations du panier
+                  // Informations
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          // Pour le panier personnel, simplifier le nom
-                          cartType == 'personal'
-                              ? 'Panier personnel'
-                              : (item['cart_name'] ?? 'Article'),
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.getTextPrimary(isDark),
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-
-                        // Badge type de panier - seulement pour les types non-personnel
-                        if (cartType != 'personal')
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: cartIconColor.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              _getCartTypeLabel(cartType),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: cartIconColor,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        const SizedBox(height: 8),
-
-                        // Nombre d'articles et prix
                         Row(
                           children: [
-                            Text(
-                              '${_safeToInt(item['items_count'])} article${_safeToInt(item['items_count']) > 1 ? 's' : ''}',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: AppColors.getTextSecondary(isDark),
+                            Expanded(
+                              child: Text(
+                                cartName,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.getTextPrimary(isDark),
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            const Spacer(),
-                            Text(
-                              CurrencyUtils.formatPrice(
-                                  _safeToDouble(item['cart_total_price'])),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.primary,
-                              ),
-                            ),
+                            _buildCartTypeChip(
+                                item['cart_reference_type'], isDark),
                           ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '$itemsCount article${itemsCount > 1 ? 's' : ''}',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: AppColors.getTextSecondary(isDark),
+                          ),
+                        ),
+                        if (hasProducts && products.length > 1) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '${products.length} produits différents',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.getTextSecondary(isDark),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        Text(
+                          CurrencyUtils.formatPrice(totalPrice),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary,
+                          ),
                         ),
                       ],
                     ),
@@ -957,247 +520,138 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
                   // Boutons d'action
                   Column(
                     children: [
-                      // Bouton de suppression
-                      GestureDetector(
-                        onTap: () => _removeItem(index),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
+                      if (hasProducts)
+                        IconButton(
+                          onPressed: () => _showCartItemDetails(item),
+                          icon: Icon(
+                            Icons.visibility_outlined,
+                            color: AppColors.primary,
                           ),
-                          child: const Icon(
-                            Icons.delete_outline,
-                            color: Colors.red,
-                            size: 20,
-                          ),
+                          tooltip: 'Voir détails',
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      // Indicateur d'expansion
-                      Icon(
-                        isExpanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        color: AppColors.getTextSecondary(isDark),
+                      IconButton(
+                        onPressed: () => _removeFromCart(item['id']),
+                        icon: Icon(
+                          Icons.delete_outline,
+                          color: AppColors.error,
+                        ),
+                        tooltip: 'Supprimer',
                       ),
                     ],
                   ),
                 ],
               ),
-            ),
-          ),
-        ),
 
-        // Détails du panier (produits) - visible uniquement si le panier est développé
-        if (isExpanded)
-          Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: AppColors.getBackground(isDark),
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(20),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.getShadow(isDark),
-                  blurRadius: 15,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            child: cartItems.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Center(
+              // Aperçu des produits (si disponibles)
+              if (hasProducts && products.length > 1) ...[
+                const SizedBox(height: 12),
+                const Divider(),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.inventory_2_outlined,
+                      size: 16,
+                      color: AppColors.getTextSecondary(isDark),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
                       child: Text(
-                        'Chargement des produits...',
+                        'Contient ${products.length} produits différents',
                         style: TextStyle(
+                          fontSize: 12,
                           color: AppColors.getTextSecondary(isDark),
-                          fontStyle: FontStyle.italic,
                         ),
                       ),
                     ),
-                  )
-                : Column(
-                    children: cartItems.map((product) {
-                      return _buildProductItem(
-                          product, cartId, cartType, isDark);
-                    }).toList(),
-                  ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildProductItem(Map<String, dynamic> product, String cartId,
-      String cartType, bool isDark) {
-    final productId = product['product_id'] ?? product['id'];
-    final quantity = product['quantity'] ?? 1;
-    final productName = product['name'] ?? product['product_name'] ?? 'Produit';
-    final productImage = product['image'] ?? product['product_image'];
-    final productPrice =
-        _safeToDouble(product['price'] ?? product['product_price'] ?? 0);
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: AppColors.getBorder(isDark),
-            width: 0.5,
+                    Text(
+                      'Voir détails',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.arrow_forward_ios,
+                      size: 12,
+                      color: AppColors.primary,
+                    ),
+                  ],
+                ),
+              ],
+            ],
           ),
         ),
       ),
-      child: Row(
-        children: [
-          // Image du produit
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              color: AppColors.primary.withOpacity(0.1),
-            ),
-            child: productImage != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: Image.network(
-                      productImage,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const Icon(
-                          Icons.inventory_2_outlined,
-                          color: AppColors.primary,
-                        );
-                      },
-                    ),
-                  )
-                : const Icon(
-                    Icons.inventory_2_outlined,
-                    color: AppColors.primary,
-                  ),
-          ),
+    );
+  }
 
-          const SizedBox(width: 12),
+  IconData _getCartTypeIcon(String? cartType) {
+    switch (cartType) {
+      case 'personal':
+        return Icons.person;
+      case 'recipe':
+        return Icons.restaurant_menu;
+      case 'preconfigured':
+        return Icons.inventory;
+      default:
+        return Icons.shopping_basket;
+    }
+  }
 
-          // Nom et prix du produit
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  productName,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.getTextPrimary(isDark),
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  CurrencyUtils.formatPrice(productPrice),
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
+  Widget _buildCartTypeChip(String? cartType, bool isDark) {
+    String label;
+    Color color;
 
-          // Contrôles de quantité
-          Row(
-            children: [
-              // Bouton moins
-              GestureDetector(
-                onTap: () =>
-                    _updateProductQuantity(cartId, productId, quantity - 1),
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: AppColors.getBackground(isDark),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: AppColors.getBorder(isDark),
-                    ),
-                  ),
-                  child: Icon(
-                    Icons.remove,
-                    size: 16,
-                    color: AppColors.getTextSecondary(isDark),
-                  ),
-                ),
-              ),
+    switch (cartType) {
+      case 'personal':
+        label = 'Personnel';
+        color = Colors.blue;
+        break;
+      case 'recipe':
+        label = 'Recette';
+        color = Colors.green;
+        break;
+      case 'preconfigured':
+        label = 'Pack';
+        color = Colors.orange;
+        break;
+      default:
+        label = 'Panier';
+        color = Colors.grey;
+    }
 
-              // Quantité
-              Container(
-                width: 36,
-                height: 28,
-                alignment: Alignment.center,
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  quantity.toString(),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.getTextPrimary(isDark),
-                  ),
-                ),
-              ),
-
-              // Bouton plus
-              GestureDetector(
-                onTap: () =>
-                    _updateProductQuantity(cartId, productId, quantity + 1),
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.add,
-                    size: 16,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
       ),
     );
   }
 
-  String _getCartTypeLabel(String cartType) {
-    switch (cartType) {
-      case 'personal':
-        return 'Panier personnel';
-      case 'recipe':
-        return 'Panier recette';
-      case 'preconfigured':
-        return 'Panier préconfiguré';
-      default:
-        return 'Produit';
-    }
-  }
-
-  Widget _buildCheckoutButton(bool isDark) {
+  Widget _buildCartSummary(bool isDark) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.getSurface(isDark),
+        color: AppColors.getCardBackground(isDark),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
           BoxShadow(
             color: AppColors.getShadow(isDark),
             blurRadius: 20,
-            offset: const Offset(0, -10),
+            offset: const Offset(0, -5),
           ),
         ],
       ),
@@ -1205,92 +659,68 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Résumé des coûts
+            // Sous-total
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Sous-total:',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppColors.getTextSecondary(isDark),
-                  ),
-                ),
-                Text(
-                  CurrencyUtils.formatPrice(_total),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.getTextPrimary(isDark),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Livraison:',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppColors.getTextSecondary(isDark),
-                  ),
-                ),
-                Text(
-                  CurrencyUtils.formatPrice(CurrencyUtils.deliveryFee),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.getTextPrimary(isDark),
-                  ),
-                ),
-              ],
-            ),
-            const Divider(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Total:',
+                  'Sous-total',
                   style: TextStyle(
                     fontSize: 16,
+                    color: AppColors.getTextSecondary(isDark),
+                  ),
+                ),
+                Text(
+                  CurrencyUtils.formatPrice(_subtotal),
+                  style: TextStyle(
+                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: AppColors.getTextPrimary(isDark),
                   ),
                 ),
-                Text(
-                  CurrencyUtils.formatPrice(_total + CurrencyUtils.deliveryFee),
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary,
-                  ),
-                ),
               ],
             ),
-            const SizedBox(height: 16),
+
+            const SizedBox(height: 8),
+
+            // Note sur les frais de livraison
+            Text(
+              'Frais de livraison: 1 000 FCFA',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.getTextSecondary(isDark),
+                fontStyle: FontStyle.italic,
+              ),
+              textAlign: TextAlign.center,
+            ),
+
+            const SizedBox(height: 20),
 
             // Bouton commander
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _cartItems.isNotEmpty ? _proceedToCheckout : null,
+              child: ElevatedButton.icon(
+                onPressed: _isProcessingOrder ? null : _showCheckoutDrawer,
+                icon: _isProcessingOrder
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.shopping_cart_checkout),
+                label: Text(_isProcessingOrder ? 'Traitement...' : 'Commander'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  elevation: 0,
-                ),
-                child: const Text(
-                  'Commander',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  elevation: 4,
                 ),
               ),
             ),
@@ -1299,292 +729,857 @@ class _CartPageState extends State<CartPage> with TickerProviderStateMixin {
       ),
     );
   }
+}
 
-  Widget _buildCheckoutBottomSheet() {
+// Widget pour afficher les détails d'un panier
+class CartItemDetailsDrawer extends StatelessWidget {
+  final Map<String, dynamic> cartItem;
+
+  const CartItemDetailsDrawer({
+    super.key,
+    required this.cartItem,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final products = cartItem['products'] as List<dynamic>? ?? [];
 
     return Container(
+      height: MediaQuery.of(context).size.height * 0.75,
       decoration: BoxDecoration(
-        color: AppColors.getCardBackground(isDark),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+        color: AppColors.getBackground(isDark),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 20,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Handle
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.getBorder(isDark),
-                borderRadius: BorderRadius.circular(2),
-              ),
+      child: Column(
+        children: [
+          // Handle
+          Container(
+            width: 40,
+            height: 4,
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.getTextSecondary(isDark),
+              borderRadius: BorderRadius.circular(2),
             ),
-            const SizedBox(height: 20),
+          ),
 
-            // Titre
-            Text(
-              'Finaliser la commande',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: AppColors.getTextPrimary(isDark),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Adresse de livraison
-            Row(
+          // Titre
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _addressController,
-                    decoration: InputDecoration(
-                      labelText: 'Adresse de livraison',
-                      hintText: 'Entrez votre adresse complète',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      prefixIcon: const Icon(Icons.location_on),
+                  child: Text(
+                    cartItem['cart_name'] ?? 'Détails du panier',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.getTextPrimary(isDark),
                     ),
-                    maxLines: 2,
                   ),
                 ),
-                const SizedBox(width: 8),
                 IconButton(
-                  onPressed: _isGettingLocation ? null : _getCurrentLocation,
-                  icon: _isGettingLocation
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.my_location),
-                  tooltip: 'Utiliser ma position actuelle',
+                  onPressed: () => Navigator.pop(context),
+                  icon: Icon(
+                    Icons.close,
+                    color: AppColors.getTextSecondary(isDark),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+          ),
 
-            // Zone de livraison
-            DropdownButtonFormField<String>(
-              value: _selectedZoneId,
-              decoration: InputDecoration(
-                labelText: 'Zone de livraison',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                prefixIcon: const Icon(Icons.map),
-              ),
-              items: _deliveryZones.map((zone) {
-                final fee = _safeToDouble(zone['delivery_fee']);
-                return DropdownMenuItem<String>(
-                  value: zone['id'],
-                  child: Text(
-                      '${zone['name']} (${CurrencyUtils.formatPrice(fee)})'),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedZoneId = value;
-                });
-              },
-            ),
-            const SizedBox(height: 20),
+          const Divider(),
 
-            // Résumé de la commande
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.getBackground(isDark),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Sous-total:',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppColors.getTextSecondary(isDark),
-                        ),
-                      ),
-                      Text(
-                        CurrencyUtils.formatPrice(_total),
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.getTextPrimary(isDark),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Livraison:',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppColors.getTextSecondary(isDark),
-                        ),
-                      ),
-                      Text(
-                        CurrencyUtils.formatPrice(CurrencyUtils.deliveryFee),
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.getTextPrimary(isDark),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Total:',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.getTextPrimary(isDark),
-                        ),
-                      ),
-                      Text(
-                        CurrencyUtils.formatPrice(
-                            _total + CurrencyUtils.deliveryFee),
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Méthode de paiement
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.getBackground(isDark),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.primary.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(
-                      Icons.payments,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
+          // Liste des produits
+          Expanded(
+            child: products.isEmpty
+                ? Center(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(
-                          'Paiement à la livraison',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.getTextPrimary(isDark),
-                          ),
+                        Icon(
+                          Icons.inventory_2_outlined,
+                          size: 64,
+                          color: AppColors.getTextSecondary(isDark),
                         ),
+                        const SizedBox(height: 16),
                         Text(
-                          'Payez en espèces à la réception',
+                          'Aucun produit dans ce panier',
                           style: TextStyle(
-                            fontSize: 12,
                             color: AppColors.getTextSecondary(isDark),
                           ),
                         ),
                       ],
                     ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(20),
+                    itemCount: products.length,
+                    itemBuilder: (context, index) {
+                      final product = products[index];
+                      return _buildProductItem(product, isDark);
+                    },
                   ),
-                  const Icon(
-                    Icons.check_circle,
-                    color: AppColors.primary,
+          ),
+
+          // Résumé
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.getCardBackground(isDark),
+              border: Border(
+                top: BorderSide(color: AppColors.getBorder(isDark)),
+              ),
+            ),
+            child: SafeArea(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Total du panier',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.getTextPrimary(isDark),
+                    ),
+                  ),
+                  Text(
+                    CurrencyUtils.formatPrice(
+                      (cartItem['cart_total_price'] as num?)?.toDouble() ?? 0.0,
+                    ),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
                   ),
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
 
-            // Boutons
-            const SizedBox(height: 20),
-            Row(
+  Widget _buildProductItem(Map<String, dynamic> product, bool isDark) {
+    final quantity = product['quantity'] ?? 0;
+    final price = (product['price'] as num?)?.toDouble() ?? 0.0;
+    final totalPrice =
+        (product['total_price'] as num?)?.toDouble() ?? (price * quantity);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.getCardBackground(isDark),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.getBorder(isDark)),
+      ),
+      child: Row(
+        children: [
+          // Image du produit
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: AppColors.primary.withOpacity(0.1),
+            ),
+            child: product['image'] != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      product['image'],
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Icon(
+                          Icons.shopping_basket,
+                          color: AppColors.primary,
+                          size: 24,
+                        );
+                      },
+                    ),
+                  )
+                : Icon(
+                    Icons.shopping_basket,
+                    color: AppColors.primary,
+                    size: 24,
+                  ),
+          ),
+
+          const SizedBox(width: 12),
+
+          // Informations du produit
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed:
-                        _isPlacingOrder ? null : () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      side: BorderSide(color: AppColors.getBorder(isDark)),
-                    ),
-                    child: Text(
-                      'Annuler',
-                      style: TextStyle(color: AppColors.getTextPrimary(isDark)),
-                    ),
+                Text(
+                  product['name'] ?? 'Produit',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.getTextPrimary(isDark),
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton(
-                    onPressed: _isPlacingOrder ? null : _placeOrder,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: _isPlacingOrder
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'Confirmer la commande',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                const SizedBox(height: 4),
+                Text(
+                  '$quantity ${product['unit'] ?? 'pièce'}${quantity > 1 ? 's' : ''}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.getTextSecondary(isDark),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${CurrencyUtils.formatPrice(price)} / ${product['unit'] ?? 'pièce'}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.getTextSecondary(isDark),
                   ),
                 ),
               ],
             ),
-          ],
+          ),
+
+          // Prix total
+          Text(
+            CurrencyUtils.formatPrice(totalPrice),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Widget pour le checkout avec système de localisation (géolocalisation uniquement)
+class CheckoutDrawer extends StatefulWidget {
+  final double subtotal;
+  final List<Map<String, dynamic>> cartItems;
+  final VoidCallback onOrderCompleted;
+
+  const CheckoutDrawer({
+    super.key,
+    required this.subtotal,
+    required this.cartItems,
+    required this.onOrderCompleted,
+  });
+
+  @override
+  State<CheckoutDrawer> createState() => _CheckoutDrawerState();
+}
+
+class _CheckoutDrawerState extends State<CheckoutDrawer> {
+  final _formKey = GlobalKey<FormState>();
+  final _notesController = TextEditingController();
+
+  bool _isProcessingOrder = false;
+  bool _isLoadingLocation = false;
+  double _deliveryFee = 1000.0;
+  double _total = 0.0;
+
+  // Données de localisation
+  Position? _currentPosition;
+  AddressInfo? _selectedAddress;
+
+  @override
+  void initState() {
+    super.initState();
+    _total = widget.subtotal + _deliveryFee;
+  }
+
+  @override
+  void dispose() {
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isLoadingLocation = true;
+    });
+
+    try {
+      // Vérifier les permissions
+      final hasPermission =
+          await LocationService.checkAndRequestLocationPermission();
+      if (!hasPermission) {
+        if (mounted) {
+          final shouldOpenSettings = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Permission requise'),
+              content: const Text(
+                'L\'accès à la localisation est nécessaire pour déterminer votre adresse de livraison. Voulez-vous ouvrir les paramètres ?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Annuler'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Paramètres'),
+                ),
+              ],
+            ),
+          );
+
+          if (shouldOpenSettings == true) {
+            await LocationService.openAppSettings();
+          }
+        }
+        return;
+      }
+
+      // Obtenir la position
+      final position = await LocationService.getCurrentPosition();
+      if (position == null) {
+        throw Exception('Impossible d\'obtenir votre position');
+      }
+
+      // Obtenir l\'adresse
+      final addressInfo =
+          await LocationService.getDetailedAddressFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      if (addressInfo == null) {
+        throw Exception('Impossible de déterminer votre adresse');
+      }
+
+      setState(() {
+        _currentPosition = position;
+        _selectedAddress = addressInfo;
+      });
+
+      if (kDebugMode) {
+        print(
+            '📍 Position actuelle: ${position.latitude}, ${position.longitude}');
+        print('🏠 Adresse: ${addressInfo.shortAddress}');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Position détectée avec succès'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur géolocalisation: $e');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur de géolocalisation: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingLocation = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _processOrder() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    if (_selectedAddress == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Veuillez utiliser votre position actuelle pour la livraison'),
+          backgroundColor: AppColors.error,
         ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isProcessingOrder = true;
+    });
+
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        throw Exception('Utilisateur non connecté');
+      }
+
+      if (kDebugMode) {
+        print('🛒 Traitement de la commande...');
+        print('📦 ${widget.cartItems.length} paniers dans la commande');
+        print('💰 Montant total: ${widget.subtotal} FCFA');
+        print('📍 Adresse: ${_selectedAddress!.displayName}');
+        print(
+            '🗺️ Coordonnées: ${_selectedAddress!.latitude}, ${_selectedAddress!.longitude}');
+      }
+
+      // Préparer les items pour la commande
+      final orderItems = widget.cartItems
+          .map((item) => {
+                'cart_name': item['cart_name'],
+                'items_count': item['items_count'],
+                'cart_total_price': item['cart_total_price'],
+                'products': item['products'],
+              })
+          .toList();
+
+      // Préparer les données additionnelles avec coordonnées GPS
+      final additionalData = <String, dynamic>{
+        'delivery_latitude': _selectedAddress!.latitude,
+        'delivery_longitude': _selectedAddress!.longitude,
+        'address_info': _selectedAddress!.toJson(),
+      };
+
+      // Créer la commande avec les coordonnées GPS
+      final order = await DeliveryService.createOrderWithDelivery(
+        userId: user.id,
+        totalAmount: widget.subtotal,
+        items: orderItems,
+        deliveryAddress: _selectedAddress!.displayName,
+        deliveryNotes: _notesController.text.trim().isNotEmpty
+            ? _notesController.text.trim()
+            : null,
+        additionalData: additionalData,
+      );
+
+      if (order != null && mounted) {
+        if (kDebugMode) {
+          print('✅ Commande créée avec succès: ${order.id}');
+        }
+
+        // Vider le panier après commande réussie
+        await CartService.clearMainCart();
+
+        // Afficher le succès
+        HapticFeedback.heavyImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Commande passée avec succès ! N° ${order.id.substring(0, 8)}'),
+            backgroundColor: AppColors.success,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+
+        // Fermer le drawer et rafraîchir
+        widget.onOrderCompleted();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur lors de la commande: $e');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur lors de la commande: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessingOrder = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.9,
+      decoration: BoxDecoration(
+        color: AppColors.getBackground(isDark),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        children: [
+          // Handle
+          Container(
+            width: 40,
+            height: 4,
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.getTextSecondary(isDark),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+
+          // Titre
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Text(
+                  'Finaliser la commande',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.getTextPrimary(isDark),
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: Icon(
+                    Icons.close,
+                    color: AppColors.getTextSecondary(isDark),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const Divider(),
+
+          // Contenu scrollable
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Section localisation
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.location_on,
+                          color: AppColors.primary,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Adresse de livraison',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.getTextPrimary(isDark),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Bouton géolocalisation
+                    Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: AppColors.primary.withOpacity(0.3),
+                        ),
+                      ),
+                      child: InkWell(
+                        onTap: _isLoadingLocation ? null : _getCurrentLocation,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              if (_isLoadingLocation)
+                                SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      AppColors.primary,
+                                    ),
+                                  ),
+                                )
+                              else
+                                Icon(
+                                  Icons.my_location,
+                                  color: AppColors.primary,
+                                  size: 20,
+                                ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _isLoadingLocation
+                                          ? 'Localisation en cours...'
+                                          : 'Utiliser ma position actuelle',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.primary,
+                                      ),
+                                    ),
+                                    if (_selectedAddress != null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _selectedAddress!.shortAddress,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.getTextSecondary(
+                                              isDark),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                Icons.arrow_forward_ios,
+                                size: 16,
+                                color: AppColors.primary,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Affichage de l'adresse sélectionnée
+                    if (_selectedAddress != null) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.success.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: AppColors.success.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.check_circle,
+                                  color: AppColors.success,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Adresse confirmée',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.success,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _selectedAddress!.shortAddress,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: AppColors.getTextPrimary(isDark),
+                              ),
+                            ),
+                            if (_currentPosition != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Coordonnées: ${_currentPosition!.latitude.toStringAsFixed(6)}, ${_currentPosition!.longitude.toStringAsFixed(6)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.getTextSecondary(isDark),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 24),
+
+                    // Notes de livraison
+                    Text(
+                      'Notes de livraison (optionnel)',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.getTextPrimary(isDark),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _notesController,
+                      decoration: InputDecoration(
+                        hintText: 'Instructions spéciales pour le livreur',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        prefixIcon: const Icon(Icons.note),
+                      ),
+                      maxLines: 2,
+                    ),
+
+                    const SizedBox(height: 32),
+
+                    // Résumé de la commande
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.getCardBackground(isDark),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.getBorder(isDark)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Résumé de la commande',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.getTextPrimary(isDark),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Sous-total',
+                                style: TextStyle(
+                                  color: AppColors.getTextSecondary(isDark),
+                                ),
+                              ),
+                              Text(
+                                CurrencyUtils.formatPrice(widget.subtotal),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.getTextPrimary(isDark),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Frais de livraison',
+                                style: TextStyle(
+                                  color: AppColors.getTextSecondary(isDark),
+                                ),
+                              ),
+                              Text(
+                                CurrencyUtils.formatPrice(_deliveryFee),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.getTextPrimary(isDark),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Livraison estimée: 45 minutes',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.getTextSecondary(isDark),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                          const Divider(height: 24),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Total',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.getTextPrimary(isDark),
+                                ),
+                              ),
+                              Text(
+                                CurrencyUtils.formatPrice(_total),
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Bouton de commande fixe en bas
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.getCardBackground(isDark),
+              border: Border(
+                top: BorderSide(color: AppColors.getBorder(isDark)),
+              ),
+            ),
+            child: SafeArea(
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _isProcessingOrder ? null : _processOrder,
+                  icon: _isProcessingOrder
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Icon(Icons.payment),
+                  label: Text(
+                    _isProcessingOrder
+                        ? 'Traitement en cours...'
+                        : 'Confirmer la commande',
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 4,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

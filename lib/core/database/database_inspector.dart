@@ -7,18 +7,14 @@ class DatabaseInspector {
   static Future<TableInfo> inspectTable(String tableName) async {
     try {
       // Récupérer quelques enregistrements pour analyser la structure
-      final sample = await _client
-          .from(tableName)
-          .select('*')
-          .limit(1);
+      final sample = await _client.from(tableName).select('*').limit(1);
 
       final columnCount = sample.isNotEmpty ? sample.first.keys.length : 0;
-      final columns = sample.isNotEmpty ? sample.first.keys.toList() : <String>[];
+      final columns =
+          sample.isNotEmpty ? sample.first.keys.toList() : <String>[];
 
       // Compter le nombre total d'enregistrements (attention: inefficace pour grandes tables)
-      final allRows = await _client
-          .from(tableName)
-          .select('*');
+      final allRows = await _client.from(tableName).select('*');
       final recordCount = allRows.length;
 
       return TableInfo(
@@ -40,12 +36,18 @@ class DatabaseInspector {
   /// Génère un rapport complet de la base de données
   static Future<DatabaseReport> generateDatabaseReport() async {
     final tables = [
-      'videos', 'recipes', 'products', 'user_profiles',
-      'favorites', 'user_history', 'orders', 'cart_items'
+      'videos',
+      'recipes',
+      'products',
+      'profiles',
+      'favorites',
+      'user_history',
+      'orders',
+      'cart_items'
     ];
 
     final tableInfos = <TableInfo>[];
-    
+
     for (final table in tables) {
       final info = await inspectTable(table);
       tableInfos.add(info);
@@ -93,17 +95,16 @@ class DatabaseReport {
   void printReport() {
     print('\n🗄️ RAPPORT D\'INSPECTION DE LA BASE DE DONNÉES');
     print('=' * 60);
-    
+
     for (final table in tables) {
       table.printInfo();
       print('');
     }
-    
+
     final existingTables = tables.where((t) => t.exists).length;
-    final totalRecords = tables
-        .where((t) => t.exists)
-        .fold(0, (sum, t) => sum + t.recordCount);
-    
+    final totalRecords =
+        tables.where((t) => t.exists).fold(0, (sum, t) => sum + t.recordCount);
+
     print('📊 RÉSUMÉ:');
     print('   Tables existantes: $existingTables/${tables.length}');
     print('   Total enregistrements: $totalRecords');

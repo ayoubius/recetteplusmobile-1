@@ -3,26 +3,26 @@ class OrderStatusHistory {
   final String orderId;
   final String status;
   final String? notes;
-  final String? createdBy;
   final DateTime createdAt;
+  final String? createdBy;
 
   OrderStatusHistory({
     required this.id,
     required this.orderId,
     required this.status,
     this.notes,
-    this.createdBy,
     required this.createdAt,
+    this.createdBy,
   });
 
   factory OrderStatusHistory.fromJson(Map<String, dynamic> json) {
     return OrderStatusHistory(
-      id: json['id'] as String,
-      orderId: json['order_id'] as String,
-      status: json['status'] as String,
-      notes: json['notes'] as String?,
-      createdBy: json['created_by'] as String?,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      id: json['id'] ?? '',
+      orderId: json['order_id'] ?? '',
+      status: json['status'] ?? '',
+      notes: json['notes'],
+      createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+      createdBy: json['created_by'],
     );
   }
 
@@ -32,55 +32,22 @@ class OrderStatusHistory {
       'order_id': orderId,
       'status': status,
       'notes': notes,
-      'created_by': createdBy,
       'created_at': createdAt.toIso8601String(),
+      'created_by': createdBy,
     };
   }
 
-  OrderStatusHistory copyWith({
-    String? id,
-    String? orderId,
-    String? status,
-    String? notes,
-    String? createdBy,
-    DateTime? createdAt,
-  }) {
-    return OrderStatusHistory(
-      id: id ?? this.id,
-      orderId: orderId ?? this.orderId,
-      status: status ?? this.status,
-      notes: notes ?? this.notes,
-      createdBy: createdBy ?? this.createdBy,
-      createdAt: createdAt ?? this.createdAt,
-    );
-  }
-
-  @override
-  String toString() {
-    return 'OrderStatusHistory(id: $id, orderId: $orderId, status: $status, '
-        'notes: $notes, createdBy: $createdBy, createdAt: $createdAt)';
-  }
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    
-    return other is OrderStatusHistory &&
-      other.id == id &&
-      other.orderId == orderId &&
-      other.status == status &&
-      other.notes == notes &&
-      other.createdBy == createdBy &&
-      other.createdAt == createdAt;
-  }
-
-  @override
-  int get hashCode {
-    return id.hashCode ^
-      orderId.hashCode ^
-      status.hashCode ^
-      notes.hashCode ^
-      createdBy.hashCode ^
-      createdAt.hashCode;
+  // Getters utiles
+  String get statusDisplay {
+    switch (status) {
+      case 'pending': return 'En attente';
+      case 'confirmed': return 'Confirmée';
+      case 'preparing': return 'En préparation';
+      case 'ready_for_pickup': return 'Prête pour livraison';
+      case 'out_for_delivery': return 'En cours de livraison';
+      case 'delivered': return 'Livrée';
+      case 'cancelled': return 'Annulée';
+      default: return 'Inconnu';
+    }
   }
 }

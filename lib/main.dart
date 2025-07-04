@@ -11,6 +11,8 @@ import 'features/cart/presentation/pages/cart_page.dart';
 import 'features/videos/presentation/pages/videos_page.dart';
 import 'core/constants/app_colors.dart';
 import 'core/services/theme_service.dart';
+import 'core/services/video_lifecycle_manager.dart';
+import 'core/services/enhanced_simple_video_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +21,16 @@ void main() async {
     if (kDebugMode) {
       debugPrint('🚀 Démarrage de l\'application...');
     }
+
+    // Initialiser le gestionnaire de cycle de vie des vidéos
+    VideoLifecycleManager().initialize();
+    
+    // Configurer le gestionnaire de vidéos amélioré avec lecture automatique activée
+    EnhancedSimpleVideoManager().configure(
+      autoResumeOnPageReturn: true, // Activé pour la reprise automatique
+      autoPlayOnAppStart: true, // Activé pour le démarrage automatique
+      preloadDistance: const Duration(seconds: 3),
+    );
 
     // Charger les variables d'environnement depuis le fichier .env
     String? envContent;
@@ -404,8 +416,18 @@ class MainNavigationPage extends StatefulWidget {
 
 class _MainNavigationPageState extends State<MainNavigationPage> {
   late int _selectedIndex;
-
   late List<Widget> _pages;
+  final VideoLifecycleManager _lifecycleManager = VideoLifecycleManager();
+  final EnhancedSimpleVideoManager _videoManager = EnhancedSimpleVideoManager();
+
+  // Noms des pages pour le tracking
+  final List<String> _pageNames = [
+    'recipes',
+    'products', 
+    'videos',
+    'cart',
+    'profile',
+  ];
 
   @override
   void initState() {
@@ -420,12 +442,66 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       const CartPage(),
       const ProfilePage(),
     ];
+
+    // Définir la page initiale
+    _videoManager.setCurrentPage(_pageNames[_selectedIndex]);
+
+    // Si on démarre sur la page vidéos, déclencher la lecture automatique
+    if (_selectedIndex == 2) {
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted) {
+          _videoManager.forceResumePlayback();
+          if (kDebugMode) {
+            print('🚀 Démarrage automatique des vidéos au lancement de l\'app');
+          }
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    // Nettoyer les gestionnaires
+    _lifecycleManager.dispose();
+    _videoManager.disposeAll();
+    super.dispose();
   }
 
   void _onItemTapped(int index) {
+    if (_selectedIndex == index) return;
+
+    final previousPageName = _pageNames[_selectedIndex];
+    final newPageName = _pageNames[index];
+
+    // FORCER LA PAUSE DE TOUTES LES VIDÉOS IMMÉDIATEMENT
+    _videoManager.pauseAll();
+    
+    // Notifier le changement de page au gestionnaire de cycle de vie
+    _lifecycleManager.onPageChanged(previousPageName, newPageName);
+    
+    // Mettre à jour la page actuelle dans le gestionnaire de vidéos
+    _videoManager.setCurrentPage(newPageName);
+
     setState(() {
       _selectedIndex = index;
     });
+
+    // Si on navigue vers la page vidéos, reprendre la lecture automatiquement
+    if (index == 2) {
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (mounted) {
+          _videoManager.forceResumePlayback();
+          if (kDebugMode) {
+            print('🔄 Retour sur la page vidéos - Reprise automatique');
+          }
+        }
+      });
+    }
+
+    if (kDebugMode) {
+      print('🔄 Navigation: $previousPageName -> $newPageName');
+      print('⏸️ PAUSE FORCÉE de toutes les vidéos');
+    }
   }
 
   @override
@@ -448,65 +524,76 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       ),
     );
 
-    return Scaffold(
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _pages,
-      ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: AppColors.getSurface(isDark),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.getShadow(isDark),
-              blurRadius: 10,
-              offset: const Offset(0, -5),
-            ),
-          ],
+    return WillPopScope(
+      onWillPop: () async {
+        // Mettre en pause toutes les vidéos lors de la sortie de l'app
+        _videoManager.pauseAll();
+        _lifecycleManager.pauseAllVideos();
+        if (kDebugMode) {
+          print('🚪 Sortie de l\'app - PAUSE FORCÉE de toutes les vidéos');
+        }
+        return true;
+      },
+      child: Scaffold(
+        body: IndexedStack(
+          index: _selectedIndex,
+          children: _pages,
         ),
-        child: BottomNavigationBar(
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          items: const <BottomNavigationBarItem>[
-            BottomNavigationBarItem(
-              icon: Icon(Icons.restaurant_menu_rounded),
-              activeIcon: Icon(Icons.restaurant_menu),
-              label: 'Recettes',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.shopping_bag_rounded),
-              activeIcon: Icon(Icons.shopping_bag),
-              label: 'Produits',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.video_library_rounded),
-              activeIcon: Icon(Icons.video_library),
-              label: 'Vidéos',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.shopping_cart_rounded),
-              activeIcon: Icon(Icons.shopping_cart),
-              label: 'Panier',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_rounded),
-              activeIcon: Icon(Icons.person),
-              label: 'Profil',
-            ),
-          ],
-          currentIndex: _selectedIndex,
-          selectedItemColor: AppColors.primary,
-          unselectedItemColor: AppColors.getTextSecondary(isDark),
-          selectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 12,
+        bottomNavigationBar: Container(
+          decoration: BoxDecoration(
+            color: AppColors.getSurface(isDark),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.getShadow(isDark),
+                blurRadius: 10,
+                offset: const Offset(0, -5),
+              ),
+            ],
           ),
-          unselectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w400,
-            fontSize: 12,
+          child: BottomNavigationBar(
+            type: BottomNavigationBarType.fixed,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            items: const <BottomNavigationBarItem>[
+              BottomNavigationBarItem(
+                icon: Icon(Icons.restaurant_menu_rounded),
+                activeIcon: Icon(Icons.restaurant_menu),
+                label: 'Recettes',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.shopping_bag_rounded),
+                activeIcon: Icon(Icons.shopping_bag),
+                label: 'Produits',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.video_library_rounded),
+                activeIcon: Icon(Icons.video_library),
+                label: 'Vidéos',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.shopping_cart_rounded),
+                activeIcon: Icon(Icons.shopping_cart),
+                label: 'Panier',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.person_rounded),
+                activeIcon: Icon(Icons.person),
+                label: 'Profil',
+              ),
+            ],
+            currentIndex: _selectedIndex,
+            selectedItemColor: AppColors.primary,
+            unselectedItemColor: AppColors.getTextSecondary(isDark),
+            selectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w400,
+              fontSize: 12,
+            ),
+            onTap: _onItemTapped,
           ),
-          onTap: _onItemTapped,
         ),
       ),
     );

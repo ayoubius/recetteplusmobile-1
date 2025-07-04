@@ -4,72 +4,208 @@ import 'package:flutter/foundation.dart';
 class CartService {
   static final SupabaseClient _client = Supabase.instance.client;
 
-  // ==================== PANIER PRINCIPAL ====================
-  
-  /// Obtenir ou créer le panier principal de l'utilisateur
-  static Future<Map<String, dynamic>?> getOrCreateUserCart() async {
+  static bool get isInitialized {
     try {
-      final userId = _client.auth.currentUser?.id;
-      if (userId == null) return null;
-
-      // Essayer de récupérer le panier existant
-      try {
-        final response = await _client
-            .from('user_carts')
-            .select()
-            .eq('user_id', userId)
-            .single();
-        return response;
-      } catch (e) {
-        // Si aucun panier n'existe, en créer un
-        final newCart = await _client
-            .from('user_carts')
-            .insert({
-              'user_id': userId,
-              'total_price': 0,
-              'created_at': DateTime.now().toIso8601String(),
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .select()
-            .single();
-        return newCart;
-      }
+      final _ = Supabase.instance.client;
+      return true;
     } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur récupération/création panier: $e');
-      }
-      throw Exception('Impossible de récupérer ou créer le panier: $e');
+      return false;
     }
   }
 
-  /// Obtenir les items du panier principal
+  // ==================== PANIER PRINCIPAL (VUE UNIFIÉE) ====================
+
+  /// Obtenir tous les paniers de l'utilisateur (vue unifiée)
   static Future<List<Map<String, dynamic>>> getMainCartItems() async {
     try {
-      final cart = await getOrCreateUserCart();
-      if (cart == null) return [];
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
 
-      final response = await _client
-          .from('user_cart_items')
-          .select()
-          .eq('user_cart_id', cart['id'])
-          .order('created_at', ascending: false);
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) {
+        throw Exception('Utilisateur non connecté');
+      }
 
-      return List<Map<String, dynamic>>.from(response);
+      if (kDebugMode) {
+        print('🔍 Récupération des paniers pour l\'utilisateur: $userId');
+      }
+
+      List<Map<String, dynamic>> allCarts = [];
+
+      // 1. Récupérer le panier personnel s'il existe et a des items
+      try {
+        final personalCart = await _client
+            .from('personal_carts')
+            .select('*')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (personalCart != null) {
+          final personalItems = await getPersonalCartItems(personalCart['id']);
+
+          if (personalItems.isNotEmpty) {
+            double totalPrice = 0;
+            int itemsCount = 0;
+
+            for (final item in personalItems) {
+              totalPrice += item['total_price'] ?? 0.0;
+              itemsCount += (item['quantity'] as num?)?.toInt() ?? 0;
+            }
+
+            allCarts.add({
+              'id': 'personal_${personalCart['id']}',
+              'cart_reference_type': 'personal',
+              'cart_reference_id': personalCart['id'],
+              'cart_name': 'Mon panier personnel',
+              'cart_total_price': totalPrice,
+              'items_count': itemsCount,
+              'created_at': personalCart['created_at'],
+              'products': personalItems,
+            });
+
+            if (kDebugMode) {
+              print(
+                  '✅ Panier personnel trouvé: $itemsCount items, ${totalPrice.toStringAsFixed(0)} FCFA');
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('⚠️ Erreur panier personnel: $e');
+        }
+      }
+
+      // 2. Récupérer les paniers de recettes
+      try {
+        final recipeCarts = await _client
+            .from('recipe_user_carts')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', ascending: false);
+
+        for (final recipeCart in recipeCarts) {
+          final recipeItems = await getRecipeCartItems(recipeCart['id']);
+
+          if (recipeItems.isNotEmpty) {
+            double totalPrice = 0;
+            int itemsCount = 0;
+
+            for (final item in recipeItems) {
+              totalPrice += item['total_price'] ?? 0.0;
+              itemsCount += (item['quantity'] as num?)?.toInt() ?? 0;
+            }
+
+            allCarts.add({
+              'id': 'recipe_${recipeCart['id']}',
+              'cart_reference_type': 'recipe',
+              'cart_reference_id': recipeCart['id'],
+              'cart_name': recipeCart['cart_name'] ?? 'Recette',
+              'cart_total_price': totalPrice,
+              'items_count': itemsCount,
+              'created_at': recipeCart['created_at'],
+              'products': recipeItems,
+            });
+
+            if (kDebugMode) {
+              print(
+                  '✅ Panier recette trouvé: ${recipeCart['cart_name']} - $itemsCount items, ${totalPrice.toStringAsFixed(0)} FCFA');
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('⚠️ Erreur paniers recettes: $e');
+        }
+      }
+
+      // 3. Récupérer les paniers préconfigurés
+      try {
+        final userPreconfiguredCarts =
+            await _client.from('user_preconfigured_carts').select('''
+              *,
+              preconfigured_cart:preconfigured_carts (*)
+            ''').eq('user_id', userId).order('created_at', ascending: false);
+
+        for (final userCart in userPreconfiguredCarts) {
+          final preconfiguredCart = userCart['preconfigured_cart'];
+          if (preconfiguredCart != null) {
+            final preconfiguredItems =
+                await getPreconfiguredCartItems(preconfiguredCart['id']);
+
+            if (preconfiguredItems.isNotEmpty) {
+              double totalPrice = 0;
+              int itemsCount = 0;
+
+              for (final item in preconfiguredItems) {
+                totalPrice += item['total_price'] ?? 0.0;
+                itemsCount += (item['quantity'] as num?)?.toInt() ?? 0;
+              }
+
+              allCarts.add({
+                'id': 'preconfigured_${userCart['id']}',
+                'cart_reference_type': 'preconfigured',
+                'cart_reference_id': preconfiguredCart['id'],
+                'cart_name': preconfiguredCart['name'] ?? 'Pack',
+                'cart_total_price': totalPrice,
+                'items_count': itemsCount,
+                'created_at': userCart['created_at'],
+                'products': preconfiguredItems,
+              });
+
+              if (kDebugMode) {
+                print(
+                    '✅ Panier préconfigué trouvé: ${preconfiguredCart['name']} - $itemsCount items, ${totalPrice.toStringAsFixed(0)} FCFA');
+              }
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('⚠️ Erreur paniers préconfigurés: $e');
+        }
+      }
+
+      // Trier par date de création (plus récent en premier)
+      allCarts.sort((a, b) {
+        final dateA =
+            DateTime.tryParse(a['created_at'] ?? '') ?? DateTime.now();
+        final dateB =
+            DateTime.tryParse(b['created_at'] ?? '') ?? DateTime.now();
+        return dateB.compareTo(dateA);
+      });
+
+      if (kDebugMode) {
+        print('📦 Total des paniers trouvés: ${allCarts.length}');
+        double grandTotal = 0;
+        for (final cart in allCarts) {
+          grandTotal += cart['cart_total_price'] ?? 0.0;
+        }
+        print('💰 Total général: ${grandTotal.toStringAsFixed(0)} FCFA');
+      }
+
+      return allCarts;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur récupération items panier principal: $e');
+        print('❌ Erreur récupération paniers: $e');
       }
-      throw Exception('Impossible de récupérer les items du panier: $e');
+      throw Exception('Impossible de charger les paniers: $e');
     }
   }
 
   // ==================== PANIER PERSONNEL ====================
-  
+
   /// Obtenir ou créer le panier personnel de l'utilisateur
   static Future<Map<String, dynamic>?> getOrCreatePersonalCart() async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       final userId = _client.auth.currentUser?.id;
-      if (userId == null) return null;
+      if (userId == null) {
+        throw Exception('Utilisateur non connecté');
+      }
 
       // Essayer de récupérer le panier personnel existant
       try {
@@ -97,7 +233,7 @@ class CartService {
       if (kDebugMode) {
         print('❌ Erreur récupération/création panier personnel: $e');
       }
-      throw Exception('Impossible de récupérer ou créer le panier personnel: $e');
+      throw Exception('Impossible de créer le panier personnel: $e');
     }
   }
 
@@ -107,8 +243,14 @@ class CartService {
     required int quantity,
   }) async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       final personalCart = await getOrCreatePersonalCart();
-      if (personalCart == null) throw Exception('Impossible de créer le panier personnel');
+      if (personalCart == null) {
+        throw Exception('Impossible de créer le panier personnel');
+      }
 
       // Vérifier si le produit existe déjà
       final existingItems = await _client
@@ -119,11 +261,12 @@ class CartService {
 
       if (existingItems.isNotEmpty) {
         // Mettre à jour la quantité
-        final currentQuantity = existingItems.first['quantity'] as int;
+        final currentQuantity =
+            (existingItems.first['quantity'] as num).toInt();
         await _client
             .from('personal_cart_items')
-            .update({'quantity': currentQuantity + quantity})
-            .eq('id', existingItems.first['id']);
+            .update({'quantity': currentQuantity + quantity}).eq(
+                'id', existingItems.first['id']);
       } else {
         // Ajouter un nouvel item
         await _client.from('personal_cart_items').insert({
@@ -133,9 +276,6 @@ class CartService {
           'created_at': DateTime.now().toIso8601String(),
         });
       }
-
-      // Mettre à jour le panier principal si nécessaire
-      await _updateMainCartFromPersonal(personalCart['id']);
 
       if (kDebugMode) {
         print('✅ Produit ajouté au panier personnel');
@@ -147,45 +287,68 @@ class CartService {
       throw Exception('Impossible d\'ajouter le produit au panier: $e');
     }
   }
-  
-  /// Obtenir les items du panier personnel
-  static Future<List<Map<String, dynamic>>> getPersonalCartItems(String personalCartId) async {
+
+  /// Obtenir les items du panier personnel avec détails des produits
+  static Future<List<Map<String, dynamic>>> getPersonalCartItems(
+      String personalCartId) async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       final response = await _client
           .from('personal_cart_items')
-          .select('*, products(*)')
+          .select('''
+            *,
+            product:products (
+              id,
+              name,
+              price,
+              unit,
+              image
+            )
+          ''')
           .eq('personal_cart_id', personalCartId)
           .order('created_at', ascending: false);
 
       // Transformer les données pour un format plus facile à utiliser
       return List<Map<String, dynamic>>.from(response).map((item) {
-        final product = item['products'] as Map<String, dynamic>;
+        final product = item['product'] as Map<String, dynamic>? ?? {};
+        final quantity = (item['quantity'] as num?)?.toInt() ?? 0;
+        final price = (product['price'] as num?)?.toDouble() ?? 0.0;
+
         return {
           'id': item['id'],
           'product_id': item['product_id'],
-          'quantity': item['quantity'],
-          'name': product['name'],
+          'quantity': quantity,
+          'name': product['name'] ?? 'Produit',
           'image': product['image'],
-          'price': product['price'],
-          'unit': product['unit'],
+          'price': price,
+          'unit': product['unit'] ?? 'pièce',
+          'total_price': price * quantity,
         };
       }).toList();
     } catch (e) {
       if (kDebugMode) {
         print('❌ Erreur récupération items panier personnel: $e');
       }
-      return [];
+      throw Exception(
+          'Impossible de charger les produits du panier personnel: $e');
     }
   }
 
   // ==================== PANIERS RECETTE ====================
-  
+
   /// Créer un panier pour une recette
   static Future<String?> createRecipeCart({
     required String recipeId,
     required String recipeName,
   }) async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Utilisateur non connecté');
 
@@ -217,13 +380,19 @@ class CartService {
     required List<Map<String, dynamic>> ingredients,
   }) async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       // Créer le panier recette
       final recipeCartId = await createRecipeCart(
         recipeId: recipeId,
         recipeName: recipeName,
       );
-      
-      if (recipeCartId == null) throw Exception('Impossible de créer le panier recette');
+
+      if (recipeCartId == null) {
+        throw Exception('Impossible de créer le panier recette');
+      }
 
       // Ajouter chaque ingrédient
       for (final ingredient in ingredients) {
@@ -234,9 +403,6 @@ class CartService {
           'created_at': DateTime.now().toIso8601String(),
         });
       }
-
-      // Mettre à jour le panier principal
-      await _updateMainCartFromRecipe(recipeCartId);
 
       if (kDebugMode) {
         print('✅ Recette ajoutée au panier');
@@ -252,6 +418,10 @@ class CartService {
   /// Obtenir les paniers recette de l'utilisateur
   static Future<List<Map<String, dynamic>>> getRecipeCarts() async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       final userId = _client.auth.currentUser?.id;
       if (userId == null) return [];
 
@@ -266,45 +436,69 @@ class CartService {
       if (kDebugMode) {
         print('❌ Erreur récupération paniers recette: $e');
       }
-      throw Exception('Impossible de récupérer les paniers recette: $e');
+      throw Exception('Impossible de charger les paniers recette: $e');
     }
   }
-  
-  /// Obtenir les items d'un panier recette
-  static Future<List<Map<String, dynamic>>> getRecipeCartItems(String recipeCartId) async {
+
+  /// Obtenir les items d'un panier recette avec détails des produits
+  static Future<List<Map<String, dynamic>>> getRecipeCartItems(
+      String recipeCartId) async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       final response = await _client
           .from('recipe_cart_items')
-          .select('*, products(*)')
+          .select('''
+            *,
+            product:products (
+              id,
+              name,
+              price,
+              unit,
+              image
+            )
+          ''')
           .eq('recipe_cart_id', recipeCartId)
           .order('created_at', ascending: false);
 
       // Transformer les données pour un format plus facile à utiliser
       return List<Map<String, dynamic>>.from(response).map((item) {
-        final product = item['products'] as Map<String, dynamic>;
+        final product = item['product'] as Map<String, dynamic>? ?? {};
+        final quantity = (item['quantity'] as num?)?.toInt() ?? 0;
+        final price = (product['price'] as num?)?.toDouble() ?? 0.0;
+
         return {
           'id': item['id'],
           'product_id': item['product_id'],
-          'quantity': item['quantity'],
-          'name': product['name'],
+          'quantity': quantity,
+          'name': product['name'] ?? 'Ingrédient',
           'image': product['image'],
-          'price': product['price'],
-          'unit': product['unit'],
+          'price': price,
+          'unit': product['unit'] ?? 'g',
+          'total_price': price * quantity,
         };
       }).toList();
     } catch (e) {
       if (kDebugMode) {
         print('❌ Erreur récupération items panier recette: $e');
       }
-      return [];
+      throw Exception(
+          'Impossible de charger les ingrédients de la recette: $e');
     }
   }
 
   // ==================== PANIERS PRÉCONFIGURÉS ====================
-  
+
   /// Obtenir les paniers préconfigurés en vedette
-  static Future<List<Map<String, dynamic>>> getFeaturedPreconfiguredCarts() async {
+  static Future<List<Map<String, dynamic>>>
+      getFeaturedPreconfiguredCarts() async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       final response = await _client
           .from('preconfigured_carts')
           .select()
@@ -317,13 +511,18 @@ class CartService {
       if (kDebugMode) {
         print('❌ Erreur récupération paniers préconfigurés: $e');
       }
-      throw Exception('Impossible de récupérer les paniers préconfigurés: $e');
+      throw Exception('Impossible de charger les paniers préconfigurés: $e');
     }
   }
 
   /// Ajouter un panier préconfigué à l'utilisateur
-  static Future<void> addPreconfiguredCartToUser(String preconfiguredCartId) async {
+  static Future<void> addPreconfiguredCartToUser(
+      String preconfiguredCartId) async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Utilisateur non connecté');
 
@@ -342,12 +541,13 @@ class CartService {
           'created_at': DateTime.now().toIso8601String(),
         });
 
-        // Mettre à jour le panier principal
-        await _updateMainCartFromPreconfigured(preconfiguredCartId);
-      }
-
-      if (kDebugMode) {
-        print('✅ Panier préconfigué ajouté');
+        if (kDebugMode) {
+          print('✅ Panier préconfigué ajouté');
+        }
+      } else {
+        if (kDebugMode) {
+          print('ℹ️ Panier préconfigué déjà ajouté');
+        }
       }
     } catch (e) {
       if (kDebugMode) {
@@ -356,10 +556,15 @@ class CartService {
       throw Exception('Impossible d\'ajouter le panier préconfiguré: $e');
     }
   }
-  
+
   /// Obtenir les items d'un panier préconfiguré
-  static Future<List<Map<String, dynamic>>> getPreconfiguredCartItems(String preconfiguredCartId) async {
+  static Future<List<Map<String, dynamic>>> getPreconfiguredCartItems(
+      String preconfiguredCartId) async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       final response = await _client
           .from('preconfigured_carts')
           .select()
@@ -367,241 +572,217 @@ class CartService {
           .single();
 
       final items = response['items'] as List<dynamic>? ?? [];
-      
+
       // Transformer les données pour un format plus facile à utiliser
       return items.map((item) {
-        return Map<String, dynamic>.from(item);
+        final itemMap = Map<String, dynamic>.from(item);
+        final quantity = (itemMap['quantity'] as num?)?.toInt() ?? 0;
+        final price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
+
+        return {
+          ...itemMap,
+          'quantity': quantity,
+          'total_price': price * quantity,
+        };
       }).toList();
     } catch (e) {
       if (kDebugMode) {
         print('❌ Erreur récupération items panier préconfiguré: $e');
       }
-      return [];
+      throw Exception(
+          'Impossible de charger les items du panier préconfiguré: $e');
     }
   }
 
-  // ==================== GESTION DU PANIER PRINCIPAL ====================
-  
-  /// Mettre à jour le panier principal depuis le panier personnel
-  static Future<void> _updateMainCartFromPersonal(String personalCartId) async {
+  // ==================== GESTION GLOBALE ====================
+
+  /// Calculer le total de tous les paniers
+  static Future<double> calculateMainCartTotal() async {
     try {
-      final userCart = await getOrCreateUserCart();
-      if (userCart == null) return;
+      final cartItems = await getMainCartItems();
+      double total = 0.0;
 
-      // Calculer le total et le nombre d'items du panier personnel
-      final personalItems = await _client
-          .from('personal_cart_items')
-          .select('*, products(*)')
-          .eq('personal_cart_id', personalCartId);
-
-      double totalPrice = 0;
-      int itemsCount = 0;
-
-      for (final item in personalItems) {
-        final product = item['products'];
-        if (product != null) {
-          final price = (product['price'] as num?)?.toDouble() ?? 0.0;
-          final quantity = item['quantity'] as int;
-          totalPrice += price * quantity;
-          itemsCount += quantity;
-        }
-      }
-
-      // Vérifier si cet item existe déjà dans le panier principal
-      final existingMainItem = await _client
-          .from('user_cart_items')
-          .select()
-          .eq('user_cart_id', userCart['id'])
-          .eq('cart_reference_type', 'personal')
-          .eq('cart_reference_id', personalCartId);
-
-      if (existingMainItem.isNotEmpty) {
-        // Mettre à jour l'item existant
-        await _client
-            .from('user_cart_items')
-            .update({
-              'cart_total_price': totalPrice,
-              'items_count': itemsCount,
-            })
-            .eq('id', existingMainItem.first['id']);
-      } else {
-        // Créer un nouvel item dans le panier principal
-        await _client.from('user_cart_items').insert({
-          'user_cart_id': userCart['id'],
-          'cart_reference_type': 'personal',
-          'cart_reference_id': personalCartId,
-          'cart_name': 'Panier personnel',
-          'cart_total_price': totalPrice,
-          'items_count': itemsCount,
-          'created_at': DateTime.now().toIso8601String(),
-        });
-      }
-
-      // Mettre à jour le total du panier principal
-      await _updateMainCartTotal(userCart['id']);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur mise à jour panier principal depuis personnel: $e');
-      }
-      throw Exception('Erreur de mise à jour du panier: $e');
-    }
-  }
-
-  /// Mettre à jour le panier principal depuis un panier recette
-  static Future<void> _updateMainCartFromRecipe(String recipeCartId) async {
-    try {
-      final userCart = await getOrCreateUserCart();
-      if (userCart == null) return;
-
-      // Récupérer les informations du panier recette
-      final recipeCart = await _client
-          .from('recipe_user_carts')
-          .select()
-          .eq('id', recipeCartId)
-          .single();
-
-      // Calculer le total et le nombre d'items
-      final recipeItems = await _client
-          .from('recipe_cart_items')
-          .select('*, products(*)')
-          .eq('recipe_cart_id', recipeCartId);
-
-      double totalPrice = 0;
-      int itemsCount = 0;
-
-      for (final item in recipeItems) {
-        final product = item['products'];
-        if (product != null) {
-          final price = (product['price'] as num?)?.toDouble() ?? 0.0;
-          final quantity = item['quantity'] as int;
-          totalPrice += price * quantity;
-          itemsCount += quantity;
-        }
-      }
-
-      // Ajouter au panier principal
-      await _client.from('user_cart_items').insert({
-        'user_cart_id': userCart['id'],
-        'cart_reference_type': 'recipe',
-        'cart_reference_id': recipeCartId,
-        'cart_name': recipeCart['cart_name'],
-        'cart_total_price': totalPrice,
-        'items_count': itemsCount,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      // Mettre à jour le total du panier principal
-      await _updateMainCartTotal(userCart['id']);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur mise à jour panier principal depuis recette: $e');
-      }
-      throw Exception('Erreur de mise à jour du panier: $e');
-    }
-  }
-
-  /// Mettre à jour le panier principal depuis un panier préconfigué
-  static Future<void> _updateMainCartFromPreconfigured(String preconfiguredCartId) async {
-    try {
-      final userCart = await getOrCreateUserCart();
-      if (userCart == null) return;
-
-      // Récupérer les informations du panier préconfigué
-      final preconfiguredCart = await _client
-          .from('preconfigured_carts')
-          .select()
-          .eq('id', preconfiguredCartId)
-          .single();
-
-      // Ajouter au panier principal
-      await _client.from('user_cart_items').insert({
-        'user_cart_id': userCart['id'],
-        'cart_reference_type': 'preconfigured',
-        'cart_reference_id': preconfiguredCartId,
-        'cart_name': preconfiguredCart['name'],
-        'cart_total_price': preconfiguredCart['total_price'] ?? 0,
-        'items_count': (preconfiguredCart['items'] as List?)?.length ?? 0,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      // Mettre à jour le total du panier principal
-      await _updateMainCartTotal(userCart['id']);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur mise à jour panier principal depuis préconfigué: $e');
-      }
-      throw Exception('Erreur de mise à jour du panier: $e');
-    }
-  }
-
-  /// Mettre à jour le total du panier principal
-  static Future<void> _updateMainCartTotal(String userCartId) async {
-    try {
-      final items = await _client
-          .from('user_cart_items')
-          .select('cart_total_price')
-          .eq('user_cart_id', userCartId);
-
-      double total = 0;
-      for (final item in items) {
+      for (final item in cartItems) {
         total += (item['cart_total_price'] as num?)?.toDouble() ?? 0.0;
       }
 
-      await _client
-          .from('user_carts')
-          .update({
-            'total_price': total,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', userCartId);
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur mise à jour total panier principal: $e');
-      }
-      throw Exception('Erreur de mise à jour du total du panier: $e');
-    }
-  }
-
-  /// Calculer le total du panier principal
-  static Future<double> calculateMainCartTotal() async {
-    try {
-      final cart = await getOrCreateUserCart();
-      if (cart == null) return 0.0;
-
-      return (cart['total_price'] as num?)?.toDouble() ?? 0.0;
+      return total;
     } catch (e) {
       if (kDebugMode) {
         print('❌ Erreur calcul total panier: $e');
       }
-      throw Exception('Erreur de calcul du total du panier: $e');
+      return 0.0;
     }
   }
 
-  /// Supprimer un item du panier principal
+  /// Supprimer un panier spécifique
   static Future<void> removeFromMainCart(String itemId) async {
     try {
-      await _client
-          .from('user_cart_items')
-          .delete()
-          .eq('id', itemId);
-      
-      // Mettre à jour le total du panier principal
-      final userCart = await getOrCreateUserCart();
-      if (userCart != null) {
-        await _updateMainCartTotal(userCart['id']);
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
+      // Extraire le type et l'ID du panier depuis l'itemId
+      final parts = itemId.split('_');
+      if (parts.length < 2) {
+        throw Exception('Format d\'ID invalide');
+      }
+
+      final cartType = parts[0];
+      final cartId = parts.sublist(1).join('_');
+
+      if (kDebugMode) {
+        print('🗑️ Suppression panier: $cartType - $cartId');
+      }
+
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) {
+        throw Exception('Utilisateur non connecté');
+      }
+
+      // Supprimer selon le type de panier
+      if (cartType == 'personal') {
+        // Supprimer tous les items du panier personnel
+        await _client
+            .from('personal_cart_items')
+            .delete()
+            .eq('personal_cart_id', cartId);
+
+        // Optionnel: supprimer le panier personnel lui-même
+        // await _client
+        //     .from('personal_carts')
+        //     .delete()
+        //     .eq('id', cartId);
+      } else if (cartType == 'recipe') {
+        // Supprimer tous les items du panier recette
+        await _client
+            .from('recipe_cart_items')
+            .delete()
+            .eq('recipe_cart_id', cartId);
+
+        // Supprimer le panier recette
+        await _client
+            .from('recipe_user_carts')
+            .delete()
+            .eq('id', cartId)
+            .eq('user_id', userId);
+      } else if (cartType == 'preconfigured') {
+        // Supprimer l'association utilisateur-panier préconfigué
+        await _client
+            .from('user_preconfigured_carts')
+            .delete()
+            .eq('id', cartId)
+            .eq('user_id', userId);
       }
 
       if (kDebugMode) {
-        print('✅ Item supprimé du panier principal');
+        print('✅ Panier supprimé avec succès');
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Erreur suppression item panier: $e');
+        print('❌ Erreur suppression panier: $e');
       }
-      throw Exception('Impossible de supprimer l\'item du panier: $e');
+      throw Exception('Impossible de supprimer le panier: $e');
     }
   }
-  
+
+  /// Vider complètement tous les paniers de l'utilisateur
+  static Future<void> clearMainCart() async {
+    try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) {
+        throw Exception('Utilisateur non connecté');
+      }
+
+      if (kDebugMode) {
+        print('🧹 Vidage complet des paniers pour l\'utilisateur: $userId');
+      }
+
+      // 1. Vider le panier personnel
+      try {
+        final personalCart = await _client
+            .from('personal_carts')
+            .select('id')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (personalCart != null) {
+          await _client
+              .from('personal_cart_items')
+              .delete()
+              .eq('personal_cart_id', personalCart['id']);
+
+          if (kDebugMode) {
+            print('✅ Panier personnel vidé');
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('⚠️ Erreur vidage panier personnel: $e');
+        }
+      }
+
+      // 2. Supprimer tous les paniers recette
+      try {
+        final recipeCarts = await _client
+            .from('recipe_user_carts')
+            .select('id')
+            .eq('user_id', userId);
+
+        for (final recipeCart in recipeCarts) {
+          // Supprimer les items du panier recette
+          await _client
+              .from('recipe_cart_items')
+              .delete()
+              .eq('recipe_cart_id', recipeCart['id']);
+
+          // Supprimer le panier recette lui-même
+          await _client
+              .from('recipe_user_carts')
+              .delete()
+              .eq('id', recipeCart['id']);
+        }
+
+        if (kDebugMode) {
+          print('✅ ${recipeCarts.length} paniers recette supprimés');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('⚠️ Erreur suppression paniers recette: $e');
+        }
+      }
+
+      // 3. Supprimer toutes les associations aux paniers préconfigurés
+      try {
+        final deletedCount = await _client
+            .from('user_preconfigured_carts')
+            .delete()
+            .eq('user_id', userId);
+
+        if (kDebugMode) {
+          print('✅ Associations paniers préconfigurés supprimées');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('⚠️ Erreur suppression paniers préconfigurés: $e');
+        }
+      }
+
+      if (kDebugMode) {
+        print('✅ Tous les paniers ont été vidés avec succès');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur vidage complet des paniers: $e');
+      }
+      throw Exception('Impossible de vider les paniers: $e');
+    }
+  }
+
   /// Mettre à jour la quantité d'un produit dans un panier
   static Future<void> updateProductQuantity({
     required String cartId,
@@ -609,16 +790,20 @@ class CartService {
     required int quantity,
   }) async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       // Déterminer le type de panier à partir de l'ID
       String? cartType;
-      
+
       // Vérifier si c'est un panier personnel
       final personalCart = await _client
           .from('personal_cart_items')
           .select()
           .eq('personal_cart_id', cartId)
           .eq('product_id', productId);
-      
+
       if (personalCart.isNotEmpty) {
         cartType = 'personal';
       } else {
@@ -628,16 +813,16 @@ class CartService {
             .select()
             .eq('recipe_cart_id', cartId)
             .eq('product_id', productId);
-        
+
         if (recipeCart.isNotEmpty) {
           cartType = 'recipe';
         }
       }
-      
+
       if (cartType == null) {
         throw Exception('Type de panier non reconnu');
       }
-      
+
       // Mettre à jour la quantité selon le type de panier
       if (cartType == 'personal') {
         await _client
@@ -645,20 +830,14 @@ class CartService {
             .update({'quantity': quantity})
             .eq('personal_cart_id', cartId)
             .eq('product_id', productId);
-        
-        // Mettre à jour le panier principal
-        await _updateMainCartFromPersonal(cartId);
       } else if (cartType == 'recipe') {
         await _client
             .from('recipe_cart_items')
             .update({'quantity': quantity})
             .eq('recipe_cart_id', cartId)
             .eq('product_id', productId);
-        
-        // Mettre à jour le panier principal
-        await _updateMainCartFromRecipe(cartId);
       }
-      
+
       if (kDebugMode) {
         print('✅ Quantité mise à jour');
       }
@@ -669,23 +848,27 @@ class CartService {
       throw Exception('Impossible de mettre à jour la quantité: $e');
     }
   }
-  
+
   /// Supprimer un produit d'un panier
   static Future<void> removeProductFromCart({
     required String cartId,
     required String productId,
   }) async {
     try {
+      if (!isInitialized) {
+        throw Exception('Supabase non initialisé');
+      }
+
       // Déterminer le type de panier à partir de l'ID
       String? cartType;
-      
+
       // Vérifier si c'est un panier personnel
       final personalCart = await _client
           .from('personal_cart_items')
           .select()
           .eq('personal_cart_id', cartId)
           .eq('product_id', productId);
-      
+
       if (personalCart.isNotEmpty) {
         cartType = 'personal';
       } else {
@@ -695,16 +878,16 @@ class CartService {
             .select()
             .eq('recipe_cart_id', cartId)
             .eq('product_id', productId);
-        
+
         if (recipeCart.isNotEmpty) {
           cartType = 'recipe';
         }
       }
-      
+
       if (cartType == null) {
         throw Exception('Type de panier non reconnu');
       }
-      
+
       // Supprimer le produit selon le type de panier
       if (cartType == 'personal') {
         await _client
@@ -712,20 +895,14 @@ class CartService {
             .delete()
             .eq('personal_cart_id', cartId)
             .eq('product_id', productId);
-        
-        // Mettre à jour le panier principal
-        await _updateMainCartFromPersonal(cartId);
       } else if (cartType == 'recipe') {
         await _client
             .from('recipe_cart_items')
             .delete()
             .eq('recipe_cart_id', cartId)
             .eq('product_id', productId);
-        
-        // Mettre à jour le panier principal
-        await _updateMainCartFromRecipe(cartId);
       }
-      
+
       if (kDebugMode) {
         print('✅ Produit supprimé du panier');
       }
@@ -734,36 +911,6 @@ class CartService {
         print('❌ Erreur suppression produit: $e');
       }
       throw Exception('Impossible de supprimer le produit: $e');
-    }
-  }
-
-  /// Vider le panier principal
-  static Future<void> clearMainCart() async {
-    try {
-      final cart = await getOrCreateUserCart();
-      if (cart == null) return;
-
-      await _client
-          .from('user_cart_items')
-          .delete()
-          .eq('user_cart_id', cart['id']);
-
-      await _client
-          .from('user_carts')
-          .update({
-            'total_price': 0,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', cart['id']);
-
-      if (kDebugMode) {
-        print('✅ Panier principal vidé');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Erreur vidage panier: $e');
-      }
-      throw Exception('Impossible de vider le panier: $e');
     }
   }
 }

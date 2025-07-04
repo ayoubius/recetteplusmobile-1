@@ -390,7 +390,7 @@
     "column_name": "delivered_at",
     "data_type": "timestamp with time zone",
     "is_nullable": "YES",
-    "column_default": null,
+    "column_default": "now()",
     "extra1": null,
     "extra2": null,
     "extra3": null
@@ -2608,12 +2608,23 @@
   },
   {
     "info_type": "FUNCTION",
-    "table_name": "increment_video_views",
+    "table_name": "decrement_video_likes",
     "column_name": null,
     "data_type": "void",
     "is_nullable": null,
     "column_default": null,
-    "extra1": "\nBEGIN\n  UPDATE videos \n  SET views = COALESCE(views, 0) + 1,\n      updated_at = NOW()\n  WHERE id = video_id;\nEND;\n",
+    "extra1": "\nBEGIN\n  UPDATE videos \n  SET likes = GREATEST(COALESCE(likes, 0) - 1, 0),\n      updated_at = NOW()\n  WHERE id = video_id;\nEND;\n",
+    "extra2": "PLPGSQL",
+    "extra3": null
+  },
+  {
+    "info_type": "FUNCTION",
+    "table_name": "trigger_order_status_email",
+    "column_name": null,
+    "data_type": "trigger",
+    "is_nullable": null,
+    "column_default": null,
+    "extra1": "\nDECLARE\n  should_send_email BOOLEAN := FALSE;\n  email_type TEXT;\nBEGIN\n  -- Vérifier si le statut a changé\n  IF OLD.status IS DISTINCT FROM NEW.status THEN\n    -- Déterminer quel type d'email envoyer\n    IF NEW.status = 'validated' AND OLD.status = 'pending' THEN\n      should_send_email := TRUE;\n      email_type := 'validation';\n    ELSIF NEW.status = 'delivered' AND OLD.status != 'delivered' THEN\n      should_send_email := TRUE;\n      email_type := 'delivery';\n    END IF;\n    \n    -- Si on doit envoyer un email, appeler l'Edge Function\n    IF should_send_email THEN\n      PERFORM net.http_post(\n        url := 'https://uymqovqiuoneslmvtvti.supabase.co/functions/v1/send-order-emails',\n        headers := jsonb_build_object(\n          'Content-Type', 'application/json',\n          'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV5bXFvdnFpdW9uZXNsbXZ0dnRpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MDk3NDU4MiwiZXhwIjoyMDY2NTUwNTgyfQ.5F5Z3-k_owksQL6j4pM3-IlYvAiXB1Aq0j-DKZEphFg'\n        ),\n        body := jsonb_build_object(\n          'orderId', NEW.id,\n          'emailType', email_type\n        )\n      );\n      \n      -- Log pour debug\n      RAISE LOG 'Email % déclenché pour la commande %', email_type, NEW.id;\n    END IF;\n  END IF;\n  \n  RETURN NEW;\nEND;\n",
     "extra2": "PLPGSQL",
     "extra3": null
   },
@@ -2625,6 +2636,17 @@
     "is_nullable": null,
     "column_default": null,
     "extra1": "\nBEGIN\n  UPDATE videos \n  SET likes = COALESCE(likes, 0) + 1,\n      updated_at = NOW()\n  WHERE id = video_id;\nEND;\n",
+    "extra2": "PLPGSQL",
+    "extra3": null
+  },
+  {
+    "info_type": "FUNCTION",
+    "table_name": "increment_video_views",
+    "column_name": null,
+    "data_type": "void",
+    "is_nullable": null,
+    "column_default": null,
+    "extra1": "\nBEGIN\n  UPDATE videos \n  SET views = COALESCE(views, 0) + 1,\n      updated_at = NOW()\n  WHERE id = video_id;\nEND;\n",
     "extra2": "PLPGSQL",
     "extra3": null
   },
@@ -2806,17 +2828,6 @@
   },
   {
     "info_type": "TRIGGER",
-    "table_name": "orders",
-    "column_name": "orders_updated_at_trigger",
-    "data_type": null,
-    "is_nullable": "BEFORE",
-    "column_default": "UPDATE",
-    "extra1": "EXECUTE FUNCTION update_updated_at_column()",
-    "extra2": null,
-    "extra3": null
-  },
-  {
-    "info_type": "TRIGGER",
     "table_name": "delivery_zones",
     "column_name": "delivery_zones_updated_at_trigger",
     "data_type": null,
@@ -2856,6 +2867,28 @@
     "is_nullable": "BEFORE",
     "column_default": "UPDATE",
     "extra1": "EXECUTE FUNCTION update_google_maps_link()",
+    "extra2": null,
+    "extra3": null
+  },
+  {
+    "info_type": "TRIGGER",
+    "table_name": "orders",
+    "column_name": "order_status_email_trigger",
+    "data_type": null,
+    "is_nullable": "AFTER",
+    "column_default": "UPDATE",
+    "extra1": "EXECUTE FUNCTION trigger_order_status_email()",
+    "extra2": null,
+    "extra3": null
+  },
+  {
+    "info_type": "TRIGGER",
+    "table_name": "orders",
+    "column_name": "orders_updated_at_trigger",
+    "data_type": null,
+    "is_nullable": "BEFORE",
+    "column_default": "UPDATE",
+    "extra1": "EXECUTE FUNCTION update_updated_at_column()",
     "extra2": null,
     "extra3": null
   }

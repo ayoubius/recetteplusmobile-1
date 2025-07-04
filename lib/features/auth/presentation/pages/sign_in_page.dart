@@ -286,7 +286,7 @@ class _SignInPageState extends State<SignInPage> {
                 CustomTextField(
                   label: AppStrings.password,
                   controller: _passwordController,
-                  validator: Validators.validatePassword,
+                  validator: Validators.validatePasswordForSignIn,
                   isPassword: true,
                   prefixIcon: const Icon(
                     Icons.lock_outline,
