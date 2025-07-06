@@ -2,6 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+
+	<key>NSLocationWhenInUseUsageDescription</key>
+		<string>Nous avons besoin de votre position pour afficher des recettes proches.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+		<string>Nous avons besoin de votre position même en arrière-plan.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+		<string>Nous avons besoin d’accéder à vos photos pour sélectionner une image de recette.</string>
+	<key>NSCameraUsageDescription</key>
+		<string>Nous avons besoin d’accéder à la caméra pour prendre une photo de recette.</string>
+	<key>NSMicrophoneUsageDescription</key>
+		<string>Nous avons besoin d’accéder au micro pour enregistrer des vidéos.</string>
+		
+	<key>keychain-access-groups</key>
+	<array>
+  		<string>$(AppIdentifierPrefix)$(CFBundleIdentifier)</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

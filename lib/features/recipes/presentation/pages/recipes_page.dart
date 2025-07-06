@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/constants/app_colors.dart';
@@ -11,7 +12,8 @@ class RecipesPage extends StatefulWidget {
   State<RecipesPage> createState() => _RecipesPageState();
 }
 
-class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin {
+class _RecipesPageState extends State<RecipesPage>
+    with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   String _selectedCategory = 'Toutes';
   String _selectedDifficulty = 'Toutes';
@@ -23,7 +25,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
   String _errorMessage = '';
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
-  
+
   final List<String> _categories = [
     'Toutes',
     'Entrées',
@@ -78,8 +80,8 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
     try {
       final recipes = await RecipeService.getRecipes(
         category: _selectedCategory == 'Toutes' ? null : _selectedCategory,
-        searchQuery: _searchController.text.trim().isNotEmpty 
-            ? _searchController.text.trim() 
+        searchQuery: _searchController.text.trim().isNotEmpty
+            ? _searchController.text.trim()
             : null,
       );
 
@@ -99,7 +101,12 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
         setState(() {
           _isLoading = false;
           _hasError = true;
-          _errorMessage = e.toString();
+          if (e is SocketException) {
+            _errorMessage =
+                "Impossible d'accéder à internet. Vérifiez votre connexion.";
+          } else {
+            _errorMessage = e.toString();
+          }
           _recipes = [];
         });
       }
@@ -111,9 +118,9 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
 
     // Filtrer par difficulté
     if (_selectedDifficulty != 'Toutes') {
-      filtered = filtered.where((recipe) => 
-        recipe['difficulty'] == _selectedDifficulty
-      ).toList();
+      filtered = filtered
+          .where((recipe) => recipe['difficulty'] == _selectedDifficulty)
+          .toList();
     }
 
     // Filtrer par recherche
@@ -121,7 +128,8 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
       final searchTerm = _searchController.text.toLowerCase();
       filtered = filtered.where((recipe) {
         final title = recipe['title']?.toString().toLowerCase() ?? '';
-        final description = recipe['description']?.toString().toLowerCase() ?? '';
+        final description =
+            recipe['description']?.toString().toLowerCase() ?? '';
         return title.contains(searchTerm) || description.contains(searchTerm);
       }).toList();
     }
@@ -129,19 +137,23 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
     // Trier
     switch (_sortBy) {
       case 'popular':
-        filtered.sort((a, b) => (b['view_count'] ?? 0).compareTo(a['view_count'] ?? 0));
+        filtered.sort(
+            (a, b) => (b['view_count'] ?? 0).compareTo(a['view_count'] ?? 0));
         break;
       case 'rating':
         filtered.sort((a, b) => (b['rating'] ?? 0).compareTo(a['rating'] ?? 0));
         break;
       case 'time':
-        filtered.sort((a, b) => (a['total_time'] ?? 0).compareTo(b['total_time'] ?? 0));
+        filtered.sort(
+            (a, b) => (a['total_time'] ?? 0).compareTo(b['total_time'] ?? 0));
         break;
       case 'recent':
       default:
         filtered.sort((a, b) {
-          final dateA = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime.now();
-          final dateB = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime.now();
+          final dateA =
+              DateTime.tryParse(a['created_at'] ?? '') ?? DateTime.now();
+          final dateB =
+              DateTime.tryParse(b['created_at'] ?? '') ?? DateTime.now();
           return dateB.compareTo(dateA);
         });
         break;
@@ -155,7 +167,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
   Future<void> _addToFavorites(Map<String, dynamic> recipe) async {
     try {
       final success = await RecipeService.addToFavorites(recipe['id']);
-      
+
       if (mounted && success) {
         HapticFeedback.lightImpact();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -187,10 +199,10 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
 
   void _viewRecipe(Map<String, dynamic> recipe) {
     HapticFeedback.mediumImpact();
-    
+
     // Ajouter à l'historique
     RecipeService.addToHistory(recipe['id']);
-    
+
     // Ouvrir le drawer de détails
     showModalBottomSheet(
       context: context,
@@ -200,7 +212,19 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
         recipeId: recipe['id'],
         onClose: () => Navigator.pop(context),
         onCartUpdated: () {
-          // Optionnel: actualiser quelque chose si nécessaire
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Panier mis à jour !'),
+              action: SnackBarAction(
+                label: 'Voir panier',
+                onPressed: () {
+                  Navigator.pop(context); // Ferme le drawer
+                  Navigator.pushNamed(
+                      context, '/cart'); // Navigue vers CartPage
+                },
+              ),
+            ),
+          );
         },
       ),
     );
@@ -218,7 +242,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       backgroundColor: AppColors.getBackground(isDark),
       appBar: AppBar(
@@ -304,11 +328,14 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     style: const TextStyle(color: AppColors.textPrimary),
                     decoration: InputDecoration(
                       hintText: 'Rechercher une recette...',
-                      hintStyle: const TextStyle(color: AppColors.textSecondary),
-                      prefixIcon: const Icon(Icons.search, color: AppColors.textSecondary),
+                      hintStyle:
+                          const TextStyle(color: AppColors.textSecondary),
+                      prefixIcon: const Icon(Icons.search,
+                          color: AppColors.textSecondary),
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
-                              icon: const Icon(Icons.clear, color: AppColors.textSecondary),
+                              icon: const Icon(Icons.clear,
+                                  color: AppColors.textSecondary),
                               onPressed: () {
                                 _searchController.clear();
                                 _applyFiltersAndSort();
@@ -316,12 +343,13 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                             )
                           : null,
                       border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 16),
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
-                
+
                 // Filtres par catégorie - TEXTE TOUJOURS VISIBLE
                 SizedBox(
                   height: 40,
@@ -331,7 +359,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     itemBuilder: (context, index) {
                       final category = _categories[index];
                       final isSelected = category == _selectedCategory;
-                      
+
                       return Container(
                         margin: const EdgeInsets.only(right: 12),
                         child: FilterChip(
@@ -339,10 +367,14 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                             category,
                             style: TextStyle(
                               // SOLUTION DÉFINITIVE pour la visibilité du texte
-                              color: isSelected 
-                                  ? AppColors.primary  // Orange sur fond blanc (excellent contraste)
-                                  : Colors.white,      // Blanc sur fond transparent/coloré
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                              color: isSelected
+                                  ? AppColors
+                                      .primary // Orange sur fond blanc (excellent contraste)
+                                  : const Color.fromARGB(255, 0, 0,
+                                      0), // Blanc sur fond transparent/coloré
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
                             ),
                           ),
                           selected: isSelected,
@@ -355,7 +387,9 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                           backgroundColor: Colors.white.withOpacity(0.15),
                           selectedColor: Colors.white,
                           side: BorderSide(
-                            color: isSelected ? Colors.white : Colors.white.withOpacity(0.4),
+                            color: isSelected
+                                ? Colors.white
+                                : Colors.white.withOpacity(0.4),
                             width: isSelected ? 2 : 1,
                           ),
                           elevation: isSelected ? 3 : 1,
@@ -371,7 +405,8 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primary))
           : _hasError
               ? _buildErrorState(isDark)
               : _recipes.isEmpty
@@ -396,7 +431,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
 
   Widget _buildFilterModal() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Container(
       decoration: BoxDecoration(
         color: AppColors.getCardBackground(isDark),
@@ -424,7 +459,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
               ),
             ),
             const SizedBox(height: 20),
-            
+
             // Titre
             Text(
               'Filtres avancés',
@@ -435,7 +470,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
               ),
             ),
             const SizedBox(height: 20),
-            
+
             // Difficulté
             Align(
               alignment: Alignment.centerLeft,
@@ -449,7 +484,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
               ),
             ),
             const SizedBox(height: 12),
-            
+
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -460,10 +495,12 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     difficulty,
                     style: TextStyle(
                       // TEXTE TOUJOURS VISIBLE - contraste parfait
-                      color: isSelected 
-                          ? Colors.white  // Blanc sur fond orange
-                          : AppColors.getTextPrimary(isDark), // Couleur adaptée au thème
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      color: isSelected
+                          ? Colors.white // Blanc sur fond orange
+                          : AppColors.getTextPrimary(
+                              isDark), // Couleur adaptée au thème
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.w500,
                     ),
                   ),
                   selected: isSelected,
@@ -474,9 +511,12 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     _applyFiltersAndSort();
                   },
                   backgroundColor: AppColors.getBackground(isDark),
-                  selectedColor: AppColors.primary, // Fond orange quand sélectionné
+                  selectedColor:
+                      AppColors.primary, // Fond orange quand sélectionné
                   side: BorderSide(
-                    color: isSelected ? AppColors.primary : AppColors.getBorder(isDark),
+                    color: isSelected
+                        ? AppColors.primary
+                        : AppColors.getBorder(isDark),
                     width: isSelected ? 2 : 1,
                   ),
                   elevation: isSelected ? 2 : 0,
@@ -484,9 +524,9 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                 );
               }).toList(),
             ),
-            
+
             const SizedBox(height: 20),
-            
+
             // Boutons
             Row(
               children: [
@@ -522,7 +562,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 20),
           ],
         ),
@@ -561,8 +601,8 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
             child: Text(
-              _errorMessage.isNotEmpty 
-                  ? _errorMessage 
+              _errorMessage.isNotEmpty
+                  ? _errorMessage
                   : 'Impossible de charger les recettes. Veuillez vérifier votre connexion.',
               style: TextStyle(
                 fontSize: 16,
@@ -651,7 +691,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
       ),
     );
   }
-  
+
   Widget _buildRecipeCard(Map<String, dynamic> recipe, bool isDark) {
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
@@ -679,10 +719,12 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                   height: 200,
                   width: double.infinity,
                   decoration: const BoxDecoration(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(20)),
                   ),
                   child: ClipRRect(
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(20)),
                     child: recipe['image'] != null
                         ? Image.network(
                             recipe['image'],
@@ -708,12 +750,13 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                           ),
                   ),
                 ),
-                
+
                 // Overlay gradient
                 Positioned.fill(
                   child: Container(
                     decoration: BoxDecoration(
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                      borderRadius:
+                          const BorderRadius.vertical(top: Radius.circular(20)),
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
@@ -725,13 +768,14 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     ),
                   ),
                 ),
-                
+
                 // Badge catégorie
                 Positioned(
                   top: 16,
                   left: 16,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: AppColors.primary,
                       borderRadius: BorderRadius.circular(20),
@@ -746,21 +790,22 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     child: Text(
                       recipe['category'] ?? 'Autre',
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: Color.fromARGB(255, 65, 59, 59),
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
-                
+
                 // Badge difficulté
                 if (recipe['difficulty'] != null)
                   Positioned(
                     top: 16,
                     right: 70,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: _getDifficultyColor(recipe['difficulty']),
                         borderRadius: BorderRadius.circular(12),
@@ -782,7 +827,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                       ),
                     ),
                   ),
-                
+
                 // Bouton favori
                 Positioned(
                   top: 16,
@@ -811,14 +856,15 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     ),
                   ),
                 ),
-                
+
                 // Rating
                 if (recipe['rating'] != null)
                   Positioned(
                     bottom: 16,
                     right: 16,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: Colors.black.withOpacity(0.7),
                         borderRadius: BorderRadius.circular(12),
@@ -846,7 +892,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                   ),
               ],
             ),
-            
+
             // Informations de la recette
             Padding(
               padding: const EdgeInsets.all(20),
@@ -864,8 +910,9 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 8),
-                  
-                  if (recipe['description'] != null && recipe['description'].toString().isNotEmpty)
+
+                  if (recipe['description'] != null &&
+                      recipe['description'].toString().isNotEmpty)
                     Text(
                       recipe['description'],
                       style: TextStyle(
@@ -876,16 +923,17 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                  
+
                   const SizedBox(height: 16),
-                  
+
                   // Informations détaillées
                   Row(
                     children: [
                       if (recipe['total_time'] != null)
                         _buildInfoChip(
                           Icons.access_time,
-                          recipe['formatted_time'] ?? '${recipe['total_time']} min',
+                          recipe['formatted_time'] ??
+                              '${recipe['total_time']} min',
                           isDark,
                         ),
                       const SizedBox(width: 8),
@@ -899,7 +947,8 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
                       // Indicateur de nouveauté
                       if (_isRecent(recipe['created_at']))
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: AppColors.success,
                             borderRadius: BorderRadius.circular(12),
@@ -923,7 +972,7 @@ class _RecipesPageState extends State<RecipesPage> with TickerProviderStateMixin
       ),
     );
   }
-  
+
   Widget _buildInfoChip(IconData icon, String text, bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

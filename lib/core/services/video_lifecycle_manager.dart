@@ -1,18 +1,19 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'simple_video_manager.dart';
+import 'enhanced_simple_video_manager.dart';
 
 /// Gestionnaire du cycle de vie des vidéos pour gérer automatiquement
 /// la pause lors des changements de page, de l'état de l'application, etc.
 class VideoLifecycleManager with WidgetsBindingObserver {
-  static final VideoLifecycleManager _instance = VideoLifecycleManager._internal();
+  static final VideoLifecycleManager _instance =
+      VideoLifecycleManager._internal();
   factory VideoLifecycleManager() => _instance;
   VideoLifecycleManager._internal();
 
-  final SimpleVideoManager _videoManager = SimpleVideoManager();
+  final EnhancedSimpleVideoManager _videoManager = EnhancedSimpleVideoManager();
   bool _isInitialized = false;
   bool _isAppInBackground = false;
-  
+
   // Callbacks pour les événements de cycle de vie
   final List<VoidCallback> _onAppPausedCallbacks = [];
   final List<VoidCallback> _onAppResumedCallbacks = [];
@@ -21,10 +22,10 @@ class VideoLifecycleManager with WidgetsBindingObserver {
   /// Initialiser le gestionnaire de cycle de vie
   void initialize() {
     if (_isInitialized) return;
-    
+
     WidgetsBinding.instance.addObserver(this);
     _isInitialized = true;
-    
+
     if (kDebugMode) {
       print('🔄 VideoLifecycleManager initialisé');
     }
@@ -33,13 +34,13 @@ class VideoLifecycleManager with WidgetsBindingObserver {
   /// Nettoyer le gestionnaire
   void dispose() {
     if (!_isInitialized) return;
-    
+
     WidgetsBinding.instance.removeObserver(this);
     _onAppPausedCallbacks.clear();
     _onAppResumedCallbacks.clear();
     _onPageChangedCallbacks.clear();
     _isInitialized = false;
-    
+
     if (kDebugMode) {
       print('🗑️ VideoLifecycleManager nettoyé');
     }
@@ -78,7 +79,7 @@ class VideoLifecycleManager with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
@@ -98,16 +99,16 @@ class VideoLifecycleManager with WidgetsBindingObserver {
 
   void _handleAppPaused() {
     if (_isAppInBackground) return;
-    
+
     _isAppInBackground = true;
-    
+
     if (kDebugMode) {
       print('📱 Application mise en arrière-plan - Pause des vidéos');
     }
-    
+
     // Mettre en pause toutes les vidéos
     _videoManager.pauseAll();
-    
+
     // Notifier les callbacks
     for (final callback in _onAppPausedCallbacks) {
       try {
@@ -122,13 +123,13 @@ class VideoLifecycleManager with WidgetsBindingObserver {
 
   void _handleAppResumed() {
     if (!_isAppInBackground) return;
-    
+
     _isAppInBackground = false;
-    
+
     if (kDebugMode) {
       print('📱 Application reprise depuis l\'arrière-plan');
     }
-    
+
     // Notifier les callbacks
     for (final callback in _onAppResumedCallbacks) {
       try {
@@ -145,7 +146,7 @@ class VideoLifecycleManager with WidgetsBindingObserver {
     if (kDebugMode) {
       print('📱 Application détachée - Nettoyage des vidéos');
     }
-    
+
     // Nettoyer toutes les vidéos
     _videoManager.disposeAll();
   }
@@ -154,7 +155,7 @@ class VideoLifecycleManager with WidgetsBindingObserver {
     if (kDebugMode) {
       print('📱 Application cachée - Pause des vidéos');
     }
-    
+
     // Mettre en pause toutes les vidéos
     _videoManager.pauseAll();
   }
@@ -164,10 +165,10 @@ class VideoLifecycleManager with WidgetsBindingObserver {
     if (kDebugMode) {
       print('🔄 Changement de page: ${fromPage ?? 'null'} -> $toPage');
     }
-    
+
     // Mettre en pause toutes les vidéos lors du changement de page
     _videoManager.pauseAll();
-    
+
     // Notifier les callbacks
     for (final callback in _onPageChangedCallbacks) {
       try {
@@ -185,7 +186,7 @@ class VideoLifecycleManager with WidgetsBindingObserver {
     if (kDebugMode) {
       print('⏸️ Pause forcée de toutes les vidéos');
     }
-    
+
     _videoManager.pauseAll();
   }
 
@@ -193,5 +194,5 @@ class VideoLifecycleManager with WidgetsBindingObserver {
   bool get isAppInBackground => _isAppInBackground;
 
   /// Obtenir le gestionnaire de vidéos
-  SimpleVideoManager get videoManager => _videoManager;
+  EnhancedSimpleVideoManager get videoManager => _videoManager;
 }

@@ -183,7 +183,7 @@ class RecipeService {
     try {
       final user = _client!.auth.currentUser;
       if (user == null) return false;
-      
+
       // Vérifier si déjà en favoris
       final existing = await _client!
           .from('favorites')
@@ -192,12 +192,12 @@ class RecipeService {
           .eq('item_id', recipeId)
           .eq('type', 'recipe')
           .maybeSingle();
-      
+
       if (existing != null) {
         print('⚠️ Recette déjà en favoris');
         return true;
       }
-      
+
       await _client!.from('favorites').insert({
         'user_id': user.id,
         'item_id': recipeId,
@@ -539,41 +539,35 @@ class RecipeService {
         return false;
       }
 
-      // Créer un nouveau panier recette - SEULEMENT avec les colonnes qui existent dans le schéma
+      // Créer un nouveau panier recette dans recipe_user_carts
       final cartResponse = await _client!
-          .from('recipe_carts')
+          .from('recipe_user_carts')
           .insert({
             'user_id': user.id,
             'recipe_id': recipeId,
-            'recipe_name': recipe['title'],
+            'cart_name': recipe['title'],
             'created_at': DateTime.now().toIso8601String(),
           })
           .select()
           .single();
 
       final cartId = cartResponse['id'];
-      print('✅ Panier créé avec ID: $cartId');
+      print('✅ Panier recette créé avec ID: $cartId');
 
-      // Ajouter les ingrédients au panier
+      // Ajouter les ingrédients dans recipe_cart_items
       final ingredients = recipe['ingredients'] as List<Map<String, dynamic>>;
-      
       if (ingredients.isEmpty) {
         print('⚠️ Aucun ingrédient trouvé pour cette recette');
-        return true; // Le panier est créé même sans ingrédients
+        return true;
       }
 
       for (final ingredient in ingredients) {
         try {
           final quantity = ingredient['quantity'].round();
-          final unitPrice = ingredient['price'];
-          final totalPrice = unitPrice * quantity;
-          
-          await _client!.from('cart_items').insert({
-            'cart_id': cartId,
+          await _client!.from('recipe_cart_items').insert({
+            'recipe_cart_id': cartId,
             'product_id': ingredient['product_id'],
             'quantity': quantity,
-            'unit_price': unitPrice,
-            'total_price': totalPrice,
             'created_at': DateTime.now().toIso8601String(),
           });
           print('✅ Ingrédient ajouté: ${ingredient['name']}');
@@ -615,10 +609,7 @@ class RecipeService {
       if (user == null) return false;
 
       // Supprimer d'abord les items du panier
-      await _client!
-          .from('cart_items')
-          .delete()
-          .eq('cart_id', cartId);
+      await _client!.from('cart_items').delete().eq('cart_id', cartId);
 
       // Puis supprimer le panier
       await _client!

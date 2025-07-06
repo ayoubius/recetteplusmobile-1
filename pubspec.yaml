@@ -36,22 +36,27 @@ dependencies:
 
   # Utils
   intl: ^0.19.0
-
   uuid: ^4.5.1
   
-  # Location & Maps
+  # Location & Maps - Enhanced
   geolocator: ^11.0.0
   flutter_map: ^6.1.0
   latlong2: ^0.9.0
 
-  # Video
+  # Video - Enhanced
   video_player: ^2.10.0
 
-  # HTTP requests for geocoding
+  # HTTP requests for geocoding and enhanced features
   http: ^1.1.0
 
   # JSON handling
   json_annotation: ^4.8.1
+
+  # Connectivity - Enhanced
+  connectivity_plus: ^6.0.5
+
+  # Crypto for security
+  crypto: ^3.0.3
 
 dev_dependencies:
   mockito: ^5.4.0

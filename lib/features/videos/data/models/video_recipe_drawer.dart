@@ -2,24 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/services/recipe_service.dart';
+import '../../../../core/utils/currency_utils.dart';
+import '../../../../shared/widgets/enhanced_snackbar.dart';
 
-class RecipeDetailDrawer extends StatefulWidget {
-  final String recipeId;
+class VideoRecipeDrawer extends StatefulWidget {
+  final Map<String, dynamic> video;
   final VoidCallback onClose;
-  final VoidCallback? onCartUpdated;
 
-  const RecipeDetailDrawer({
+  const VideoRecipeDrawer({
     super.key,
-    required this.recipeId,
+    required this.video,
     required this.onClose,
-    this.onCartUpdated,
   });
 
   @override
-  State<RecipeDetailDrawer> createState() => _RecipeDetailDrawerState();
+  State<VideoRecipeDrawer> createState() => _VideoRecipeDrawerState();
 }
 
-class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
+class _VideoRecipeDrawerState extends State<VideoRecipeDrawer>
     with TickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _slideAnimation;
@@ -64,8 +64,17 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
   }
 
   Future<void> _loadRecipe() async {
+    final recipeId = widget.video['recipe_id'];
+    if (recipeId == null) {
+      setState(() {
+        _hasError = true;
+        _isLoading = false;
+      });
+      return;
+    }
+
     try {
-      final recipe = await RecipeService.getRecipeById(widget.recipeId);
+      final recipe = await RecipeService.getRecipeById(recipeId);
       if (recipe != null) {
         setState(() {
           _recipe = recipe;
@@ -73,16 +82,16 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
         });
 
         // Vérifier si en favoris
-        final isFav = await RecipeService.isFavorite(widget.recipeId);
+        final isFav = await RecipeService.isFavorite(recipeId);
         setState(() {
           _isFavorite = isFav;
         });
 
         // Ajouter à l'historique
-        await RecipeService.addToHistory(widget.recipeId);
+        await RecipeService.addToHistory(recipeId);
 
         // Incrémenter les vues
-        await RecipeService.incrementViewCount(widget.recipeId);
+        await RecipeService.incrementViewCount(recipeId);
       } else {
         setState(() {
           _hasError = true;
@@ -103,10 +112,12 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
   }
 
   Future<void> _toggleFavorite() async {
+    if (_recipe == null) return;
+
     HapticFeedback.lightImpact();
 
     if (_isFavorite) {
-      final success = await RecipeService.removeFromFavorites(widget.recipeId);
+      final success = await RecipeService.removeFromFavorites(_recipe!['id']);
       if (success) {
         setState(() {
           _isFavorite = false;
@@ -114,7 +125,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
         _showSnackBar('Recette retirée des favoris', AppColors.primary);
       }
     } else {
-      final success = await RecipeService.addToFavorites(widget.recipeId);
+      final success = await RecipeService.addToFavorites(_recipe!['id']);
       if (success) {
         setState(() {
           _isFavorite = true;
@@ -132,7 +143,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
     });
 
     try {
-      final success = await RecipeService.createCartFromRecipe(widget.recipeId);
+      final success = await RecipeService.createCartFromRecipe(_recipe!['id']);
 
       if (mounted) {
         if (success) {
@@ -144,16 +155,12 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
               label: 'Voir panier',
               textColor: Colors.white,
               onPressed: () async {
-                // Ferme le drawer puis navigue vers le panier en réinitialisant la stack
                 await _close();
                 Navigator.of(context)
                     .pushNamedAndRemoveUntil('/cart', (route) => false);
               },
             ),
           );
-
-          // Notifier la mise à jour du panier et naviguer vers le panier
-          widget.onCartUpdated?.call();
         } else {
           _showSnackBar('Erreur lors de l\'ajout au panier', AppColors.error);
         }
@@ -169,18 +176,6 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
         });
       }
     }
-  }
-
-  void _shareRecipe() {
-    HapticFeedback.lightImpact();
-    _showSnackBar(
-        'Fonctionnalité de partage bientôt disponible !', AppColors.primary);
-  }
-
-  void _addNotes() {
-    HapticFeedback.lightImpact();
-    _showSnackBar(
-        'Fonctionnalité de notes bientôt disponible !', AppColors.primary);
   }
 
   void _showSnackBar(String message, Color backgroundColor,
@@ -214,7 +209,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
           child: Opacity(
             opacity: _fadeAnimation.value,
             child: Container(
-              height: MediaQuery.of(context).size.height * 0.9,
+              height: MediaQuery.of(context).size.height * 0.85,
               decoration: BoxDecoration(
                 color: AppColors.getCardBackground(isDark),
                 borderRadius:
@@ -240,18 +235,25 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                     ),
                   ),
 
-                  // Header avec bouton fermer
+                  // Header
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Détails de la recette',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.getTextPrimary(isDark),
+                        Icon(
+                          Icons.restaurant_menu,
+                          color: AppColors.primary,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Recette de la vidéo',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.getTextPrimary(isDark),
+                            ),
                           ),
                         ),
                         IconButton(
@@ -265,7 +267,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                     ),
                   ),
 
-                  // Contenu
+                  // Content
                   Expanded(
                     child: _buildContent(isDark),
                   ),
@@ -281,8 +283,21 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
   Widget _buildContent(bool isDark) {
     if (_isLoading) {
       return const Center(
-        child: CircularProgressIndicator(
-          color: AppColors.primary,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(
+              color: AppColors.primary,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Chargement de la recette...',
+              style: TextStyle(
+                fontSize: 16,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
         ),
       );
     }
@@ -299,26 +314,20 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
             ),
             const SizedBox(height: 16),
             Text(
-              'Impossible de charger la recette',
+              'Aucune recette associée',
               style: TextStyle(
-                fontSize: 16,
-                color: AppColors.getTextSecondary(isDark),
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: AppColors.getTextPrimary(isDark),
               ),
             ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  _isLoading = true;
-                  _hasError = false;
-                });
-                _loadRecipe();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
+            const SizedBox(height: 8),
+            Text(
+              'Cette vidéo n\'a pas de recette associée',
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.getTextSecondary(isDark),
               ),
-              child: const Text('Réessayer'),
             ),
           ],
         ),
@@ -330,7 +339,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Image de la recette
+          // Recipe image
           if (_recipe!['image'] != null)
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
@@ -359,7 +368,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
 
           const SizedBox(height: 16),
 
-          // Titre et description
+          // Title and description
           Text(
             _recipe!['title'],
             style: TextStyle(
@@ -383,7 +392,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
 
           const SizedBox(height: 16),
 
-          // Statistiques
+          // Stats
           Row(
             children: [
               _buildStatChip(
@@ -408,7 +417,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
 
           const SizedBox(height: 16),
 
-          // Difficulté et coût
+          // Difficulty and cost
           Row(
             children: [
               Expanded(
@@ -434,7 +443,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                 ),
               ),
               Text(
-                'Coût: ${_recipe!['total_cost'].toStringAsFixed(2)} FCFA',
+                'Coût: ${CurrencyUtils.formatPrice(_recipe!['total_cost'])}',
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
@@ -446,7 +455,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
 
           const SizedBox(height: 24),
 
-          // Boutons d'action
+          // Action buttons
           Row(
             children: [
               Expanded(
@@ -482,28 +491,14 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                       : AppColors.getTextSecondary(isDark),
                 ),
               ),
-              IconButton(
-                onPressed: _shareRecipe,
-                icon: Icon(
-                  Icons.share,
-                  color: AppColors.getTextSecondary(isDark),
-                ),
-              ),
-              IconButton(
-                onPressed: _addNotes,
-                icon: Icon(
-                  Icons.note_add,
-                  color: AppColors.getTextSecondary(isDark),
-                ),
-              ),
             ],
           ),
 
           const SizedBox(height: 24),
 
-          // Ingrédients
+          // Ingredients
           Text(
-            'Ingrédients',
+            'Ingrédients (${_recipe!['ingredients_count']})',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
@@ -524,7 +519,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
               ),
               child: Row(
                 children: [
-                  // Image du produit
+                  // Product image
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
                     child: ingredient['image'] != null
@@ -559,7 +554,7 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                   ),
                   const SizedBox(width: 12),
 
-                  // Détails de l'ingrédient
+                  // Ingredient details
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -584,12 +579,12 @@ class _RecipeDetailDrawerState extends State<RecipeDetailDrawer>
                     ),
                   ),
 
-                  // Prix et statut
+                  // Price and status
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        '${ingredient['price'].toStringAsFixed(2)} FCFA',
+                        CurrencyUtils.formatPrice(ingredient['price']),
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,

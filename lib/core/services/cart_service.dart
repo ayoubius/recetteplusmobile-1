@@ -119,7 +119,7 @@ class CartService {
         }
       }
 
-      // 3. Récupérer les paniers préconfigurés
+      // 3. Récupérer les paniers préconfigurés avec calcul correct du total
       try {
         final userPreconfiguredCarts =
             await _client.from('user_preconfigured_carts').select('''
@@ -134,12 +134,15 @@ class CartService {
                 await getPreconfiguredCartItems(preconfiguredCart['id']);
 
             if (preconfiguredItems.isNotEmpty) {
+              // Calculer le total réel basé sur les prix des produits
               double totalPrice = 0;
               int itemsCount = 0;
 
               for (final item in preconfiguredItems) {
-                totalPrice += item['total_price'] ?? 0.0;
-                itemsCount += (item['quantity'] as num?)?.toInt() ?? 0;
+                final quantity = (item['quantity'] as num?)?.toDouble() ?? 1.0;
+                final price = (item['price'] as num?)?.toDouble() ?? 0.0;
+                totalPrice += price * quantity;
+                itemsCount += quantity.toInt();
               }
 
               allCarts.add({
@@ -147,7 +150,7 @@ class CartService {
                 'cart_reference_type': 'preconfigured',
                 'cart_reference_id': preconfiguredCart['id'],
                 'cart_name': preconfiguredCart['name'] ?? 'Pack',
-                'cart_total_price': totalPrice,
+                'cart_total_price': totalPrice, // Total calculé dynamiquement
                 'items_count': itemsCount,
                 'created_at': userCart['created_at'],
                 'products': preconfiguredItems,
@@ -557,7 +560,7 @@ class CartService {
     }
   }
 
-  /// Obtenir les items d'un panier préconfiguré
+  /// Obtenir les items d'un panier préconfiguré avec données réelles de la DB
   static Future<List<Map<String, dynamic>>> getPreconfiguredCartItems(
       String preconfiguredCartId) async {
     try {
@@ -565,26 +568,118 @@ class CartService {
         throw Exception('Supabase non initialisé');
       }
 
+      // 🔥 NOUVELLE APPROCHE: Récupérer directement depuis la base de données
       final response = await _client
           .from('preconfigured_carts')
-          .select()
+          .select('*')
           .eq('id', preconfiguredCartId)
           .single();
 
       final items = response['items'] as List<dynamic>? ?? [];
 
-      // Transformer les données pour un format plus facile à utiliser
-      return items.map((item) {
-        final itemMap = Map<String, dynamic>.from(item);
-        final quantity = (itemMap['quantity'] as num?)?.toInt() ?? 0;
-        final price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
+      if (items.isEmpty) {
+        if (kDebugMode) {
+          print(
+              '⚠️ Aucun item trouvé dans le panier préconfigué $preconfiguredCartId');
+        }
+        return [];
+      }
 
-        return {
-          ...itemMap,
-          'quantity': quantity,
-          'total_price': price * quantity,
-        };
-      }).toList();
+      // Enrichir chaque item avec les informations du produit réel
+      List<Map<String, dynamic>> enrichedItems = [];
+
+      for (final item in items) {
+        final itemMap = Map<String, dynamic>.from(item);
+        final productId = itemMap['productId'] ?? itemMap['product_id'];
+
+        if (productId != null) {
+          try {
+            // 🔥 RÉCUPÉRATION RÉELLE depuis la table products
+            final productResponse = await _client
+                .from('products')
+                .select('*')
+                .eq('id', productId)
+                .maybeSingle();
+
+            if (productResponse != null) {
+              final quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 1.0;
+              final realPrice =
+                  (productResponse['price'] as num?)?.toDouble() ?? 0.0;
+
+              enrichedItems.add({
+                'id': itemMap['id'] ?? productId,
+                'product_id': productId,
+                'name': productResponse['name'] ?? 'Produit', // 🔥 NOM RÉEL
+                'quantity': quantity,
+                'price': realPrice, // 🔥 PRIX RÉEL
+                'unit': productResponse['unit'] ?? 'pièce', // 🔥 UNITÉ RÉELLE
+                'image': productResponse['image'], // 🔥 IMAGE RÉELLE
+                'category': productResponse['category'] ?? 'Autre',
+                'in_stock': productResponse['in_stock'] ?? true,
+                'total_price': realPrice * quantity, // 🔥 CALCUL CORRECT
+              });
+
+              if (kDebugMode) {
+                print(
+                    '✅ Produit enrichi: ${productResponse['name']} - ${realPrice} FCFA');
+              }
+            } else {
+              if (kDebugMode) {
+                print(
+                    '⚠️ Produit $productId non trouvé dans la base de données');
+              }
+              // Fallback avec données de base
+              final quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 1.0;
+              final fallbackPrice =
+                  (itemMap['price'] as num?)?.toDouble() ?? 0.0;
+
+              enrichedItems.add({
+                'id': itemMap['id'] ?? productId,
+                'product_id': productId,
+                'name': itemMap['name'] ?? 'Produit non trouvé',
+                'quantity': quantity,
+                'price': fallbackPrice,
+                'unit': itemMap['unit'] ?? 'pièce',
+                'image': itemMap['image'],
+                'category': 'Autre',
+                'in_stock': false,
+                'total_price': fallbackPrice * quantity,
+              });
+            }
+          } catch (e) {
+            if (kDebugMode) {
+              print('⚠️ Erreur récupération produit $productId: $e');
+            }
+            // Fallback en cas d'erreur
+            final quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 1.0;
+            final fallbackPrice = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
+
+            enrichedItems.add({
+              'id': itemMap['id'] ?? productId,
+              'product_id': productId,
+              'name': itemMap['name'] ?? 'Produit indisponible',
+              'quantity': quantity,
+              'price': fallbackPrice,
+              'unit': itemMap['unit'] ?? 'pièce',
+              'image': itemMap['image'],
+              'category': 'Autre',
+              'in_stock': false,
+              'total_price': fallbackPrice * quantity,
+            });
+          }
+        }
+      }
+
+      if (kDebugMode) {
+        print(
+            '✅ ${enrichedItems.length} items enrichis pour le panier $preconfiguredCartId');
+        for (final item in enrichedItems) {
+          print(
+              '   - ${item['name']}: ${item['price']} FCFA x ${item['quantity']}');
+        }
+      }
+
+      return enrichedItems;
     } catch (e) {
       if (kDebugMode) {
         print('❌ Erreur récupération items panier préconfiguré: $e');
@@ -596,7 +691,7 @@ class CartService {
 
   // ==================== GESTION GLOBALE ====================
 
-  /// Calculer le total de tous les paniers
+  /// Calculer le total de tous les paniers (sans TVA)
   static Future<double> calculateMainCartTotal() async {
     try {
       final cartItems = await getMainCartItems();
@@ -615,7 +710,7 @@ class CartService {
     }
   }
 
-  /// Supprimer un panier spécifique
+  /// Supprimer un panier spécifique avec rafraîchissement automatique
   static Future<void> removeFromMainCart(String itemId) async {
     try {
       if (!isInitialized) {
@@ -647,12 +742,6 @@ class CartService {
             .from('personal_cart_items')
             .delete()
             .eq('personal_cart_id', cartId);
-
-        // Optionnel: supprimer le panier personnel lui-même
-        // await _client
-        //     .from('personal_carts')
-        //     .delete()
-        //     .eq('id', cartId);
       } else if (cartType == 'recipe') {
         // Supprimer tous les items du panier recette
         await _client
@@ -686,7 +775,7 @@ class CartService {
     }
   }
 
-  /// Vider complètement tous les paniers de l'utilisateur
+  /// Vider complètement tous les paniers de l'utilisateur avec rafraîchissement
   static Future<void> clearMainCart() async {
     try {
       if (!isInitialized) {
@@ -758,7 +847,7 @@ class CartService {
 
       // 3. Supprimer toutes les associations aux paniers préconfigurés
       try {
-        final deletedCount = await _client
+        await _client
             .from('user_preconfigured_carts')
             .delete()
             .eq('user_id', userId);

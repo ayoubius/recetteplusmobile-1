@@ -1049,49 +1049,6 @@ class _SimpleVideoPlayerState extends State<SimpleVideoPlayer>
 
                     const SizedBox(height: 16),
 
-                    // Bouton partage
-                    AnimatedBuilder(
-                      animation: _shareScale,
-                      builder: (context, child) {
-                        return Transform.scale(
-                          scale: _shareScale.value,
-                          child: GestureDetector(
-                            onTap: _onSharePressed,
-                            child: Container(
-                              width: 56,
-                              height: 56,
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    Colors.white.withOpacity(0.2),
-                                    Colors.white.withOpacity(0.1),
-                                  ],
-                                ),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.2),
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.2),
-                                    blurRadius: 15,
-                                    offset: const Offset(0, 6),
-                                  ),
-                                ],
-                              ),
-                              child: const Icon(
-                                Icons.share_rounded,
-                                color: Colors.white,
-                                size: 24,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-
                     // Bouton recette si disponible
                     if (widget.onRecipePressed != null) ...[
                       const SizedBox(height: 16),

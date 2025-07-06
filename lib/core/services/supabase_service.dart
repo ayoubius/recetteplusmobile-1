@@ -94,6 +94,24 @@ class SupabaseService {
     return [];
   }
 
+  static Future<Map<String, dynamic>?> getProductById(String productId) async {
+    try {
+      if (!isInitialized) return null;
+      final response = await client
+          .from('products')
+          .select('*')
+          .eq('id', productId)
+          .maybeSingle();
+      if (response == null) return null;
+      return Map<String, dynamic>.from(response);
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur récupération produit: $e');
+      }
+      return null;
+    }
+  }
+
   // ==================== MÉTHODES POUR LES VIDÉOS ====================
 
   static Future<List<Map<String, dynamic>>> getVideos({

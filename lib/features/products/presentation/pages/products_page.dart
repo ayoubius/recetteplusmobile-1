@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/services/supabase_service.dart';
@@ -16,7 +17,8 @@ class ProductsPage extends StatefulWidget {
   State<ProductsPage> createState() => _ProductsPageState();
 }
 
-class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMixin {
+class _ProductsPageState extends State<ProductsPage>
+    with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final PageController _cartsPageController = PageController();
   String _selectedCategory = 'Tous';
@@ -33,10 +35,6 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     'Tous',
     'Épices',
     'Huiles',
-    'Ustensiles',
-    'Électroménager',
-    'Livres',
-    'Bio',
   ];
 
   @override
@@ -128,10 +126,57 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
   Future<void> _loadFeaturedCarts() async {
     try {
       final carts = await CartService.getFeaturedPreconfiguredCarts();
+
+      // 🔥 ENRICHISSEMENT IMMÉDIAT avec données réelles
+      final cartsWithRealData = await Future.wait(carts.map((cart) async {
+        try {
+          // Récupérer les items réels depuis la base de données
+          final items = await CartService.getPreconfiguredCartItems(cart['id']);
+
+          // Calculer le prix total réel
+          double totalPrice = 0;
+          for (final item in items) {
+            final quantity = (item['quantity'] as num?)?.toDouble() ?? 1.0;
+            final price = (item['price'] as num?)?.toDouble() ?? 0.0;
+            totalPrice += price * quantity;
+          }
+
+          return {
+            ...cart,
+            'items_count': items.length,
+            'total_price': totalPrice, // 🔥 PRIX RÉEL CALCULÉ
+            'items': items, // 🔥 DONNÉES RÉELLES PRÉCHARGÉES
+          };
+        } catch (e) {
+          if (kDebugMode) {
+            print('⚠️ Erreur enrichissement panier ${cart['id']}: $e');
+          }
+          // Fallback avec données de base
+          return {
+            ...cart,
+            'items_count': 0,
+            'total_price': cart['total_price'] ?? 0.0,
+            'items': [],
+          };
+        }
+      }));
+
       setState(() {
-        _featuredCarts = carts;
+        _featuredCarts = cartsWithRealData;
       });
+
+      if (kDebugMode) {
+        print(
+            '✅ ${_featuredCarts.length} paniers préconfigurés enrichis chargés');
+        for (final cart in _featuredCarts) {
+          print(
+              '   - ${cart['name']}: ${cart['items_count']} items, ${cart['total_price']} FCFA');
+        }
+      }
     } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur chargement paniers préconfigurés: $e');
+      }
       throw Exception('Impossible de charger les paniers en vedette: $e');
     }
   }
@@ -154,7 +199,13 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
               label: 'Voir panier',
               textColor: Colors.white,
               onPressed: () {
-                // TODO: Naviguer vers le panier
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProductCartDetailPage(
+                        cart: {}), // TODO: Pass actual cart if needed
+                  ),
+                );
               },
             ),
           ),
@@ -181,15 +232,55 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
     );
   }
 
-  void _viewCartDetails(Map<String, dynamic> cart) {
+  void _viewCartDetails(Map<String, dynamic> cart) async {
     HapticFeedback.mediumImpact();
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ProductCartDetailPage(cart: cart),
+    // 🔥 OUVERTURE IMMÉDIATE - Les données sont déjà préchargées !
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => PreconfiguredCartDetailsDrawer(
+        cart: cart, // 🔥 Données déjà enrichies avec items réels
+        onAddToCart: () async {
+          Navigator.pop(context);
+          await _addPreconfiguredCartToUser(cart);
+        },
       ),
     );
+  }
+
+  Future<void> _addPreconfiguredCartToUser(Map<String, dynamic> cart) async {
+    try {
+      await CartService.addPreconfiguredCartToUser(cart['id']);
+
+      if (mounted) {
+        HapticFeedback.lightImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${cart['name']} ajouté au panier'),
+            backgroundColor: AppColors.success,
+            duration: const Duration(seconds: 2),
+            action: SnackBarAction(
+              label: 'Voir panier',
+              textColor: Colors.white,
+              onPressed: () {
+                Navigator.pushNamed(context, '/cart');
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
   }
 
   void _viewAllPreconfiguredCarts() {
@@ -216,7 +307,14 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
         product: product,
         onClose: () => Navigator.pop(context),
         onCartUpdated: () {
-          // Optionnel: actualiser quelque chose si nécessaire
+          // Naviguer vers le panier après ajout depuis le drawer
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ProductCartDetailPage(
+                  cart: {}), // TODO: Pass actual cart if needed
+            ),
+          );
         },
       ),
     );
@@ -314,11 +412,14 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                       style: TextStyle(color: AppColors.getTextPrimary(isDark)),
                       decoration: InputDecoration(
                         hintText: 'Rechercher un produit...',
-                        hintStyle: TextStyle(color: AppColors.getTextSecondary(isDark)),
-                        prefixIcon: Icon(Icons.search, color: AppColors.getTextSecondary(isDark)),
+                        hintStyle: TextStyle(
+                            color: AppColors.getTextSecondary(isDark)),
+                        prefixIcon: Icon(Icons.search,
+                            color: AppColors.getTextSecondary(isDark)),
                         suffixIcon: _searchController.text.isNotEmpty
                             ? IconButton(
-                                icon: Icon(Icons.clear, color: AppColors.getTextSecondary(isDark)),
+                                icon: Icon(Icons.clear,
+                                    color: AppColors.getTextSecondary(isDark)),
                                 onPressed: () {
                                   _searchController.clear();
                                   _loadProducts();
@@ -326,7 +427,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                               )
                             : null,
                         border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 16),
                       ),
                     ),
                   ),
@@ -351,7 +453,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8), // Réduit de 16 à 12 en haut
+                      padding: const EdgeInsets.fromLTRB(
+                          20, 12, 20, 8), // Réduit de 16 à 12 en haut
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -428,9 +531,11 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                                 onRefresh: _loadData,
                                 child: GridView.builder(
                                   padding: const EdgeInsets.all(20),
-                                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                  gridDelegate:
+                                      const SliverGridDelegateWithFixedCrossAxisCount(
                                     crossAxisCount: 2,
-                                    childAspectRatio: 0.7, // Ajusté pour éviter l'overflow
+                                    childAspectRatio:
+                                        0.7, // Ajusté pour éviter l'overflow
                                     crossAxisSpacing: 16,
                                     mainAxisSpacing: 16,
                                   ),
@@ -525,7 +630,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                 children: [
                   // Badge catégorie
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: AppColors.primary,
                       borderRadius: BorderRadius.circular(12),
@@ -571,7 +677,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        CurrencyUtils.formatPrice(cart['total_price']?.toDouble() ?? 0.0),
+                        CurrencyUtils.formatPrice(
+                            cart['total_price']?.toDouble() ?? 0.0),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 16,
@@ -579,7 +686,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(8),
@@ -668,11 +776,16 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                   backgroundColor: AppColors.getBackground(isDark),
                   selectedColor: AppColors.primary.withOpacity(0.2),
                   labelStyle: TextStyle(
-                    color: isSelected ? AppColors.primary : AppColors.getTextSecondary(isDark),
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected
+                        ? AppColors.primary
+                        : AppColors.getTextSecondary(isDark),
+                    fontWeight:
+                        isSelected ? FontWeight.w600 : FontWeight.normal,
                   ),
                   side: BorderSide(
-                    color: isSelected ? AppColors.primary : AppColors.getBorder(isDark),
+                    color: isSelected
+                        ? AppColors.primary
+                        : AppColors.getBorder(isDark),
                     width: isSelected ? 2 : 1,
                   ),
                 );
@@ -717,8 +830,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
             child: Text(
-              _errorMessage.isNotEmpty 
-                  ? _errorMessage 
+              _errorMessage.isNotEmpty
+                  ? _errorMessage
                   : 'Impossible de charger les produits. Veuillez vérifier votre connexion.',
               style: TextStyle(
                 fontSize: 16,
@@ -836,10 +949,12 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                   Container(
                     width: double.infinity,
                     decoration: const BoxDecoration(
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                      borderRadius:
+                          BorderRadius.vertical(top: Radius.circular(20)),
                     ),
                     child: ClipRRect(
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                      borderRadius:
+                          const BorderRadius.vertical(top: Radius.circular(20)),
                       child: product['image'] != null
                           ? Image.network(
                               product['image'],
@@ -878,7 +993,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                       top: 12,
                       right: 12,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.red,
                           borderRadius: BorderRadius.circular(12),
@@ -906,7 +1022,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                     top: 12,
                     left: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: AppColors.primary.withOpacity(0.9),
                         borderRadius: BorderRadius.circular(12),
@@ -935,7 +1052,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                       bottom: 12,
                       left: 12,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 3),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.7),
                           borderRadius: BorderRadius.circular(8),
@@ -1012,7 +1130,8 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                         // Prix
                         Expanded(
                           child: Text(
-                            CurrencyUtils.formatPrice(product['price']?.toDouble() ?? 0.0),
+                            CurrencyUtils.formatPrice(
+                                product['price']?.toDouble() ?? 0.0),
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -1036,13 +1155,16 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
                                   ? AppColors.primary
                                   : AppColors.getTextSecondary(isDark),
                               borderRadius: BorderRadius.circular(8),
-                              boxShadow: isInStock ? [
-                                BoxShadow(
-                                  color: AppColors.primary.withOpacity(0.3),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ] : null,
+                              boxShadow: isInStock
+                                  ? [
+                                      BoxShadow(
+                                        color:
+                                            AppColors.primary.withOpacity(0.3),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ]
+                                  : null,
                             ),
                             child: const Icon(
                               Icons.add_shopping_cart,
@@ -1059,6 +1181,334 @@ class _ProductsPageState extends State<ProductsPage> with TickerProviderStateMix
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// Widget pour le drawer des détails de panier préconfigué
+class PreconfiguredCartDetailsDrawer extends StatelessWidget {
+  final Map<String, dynamic> cart;
+  final Future<void> Function()? onAddToCart;
+
+  const PreconfiguredCartDetailsDrawer({
+    super.key,
+    required this.cart,
+    this.onAddToCart,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final items = cart['items'] as List<dynamic>? ?? [];
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.8,
+      decoration: BoxDecoration(
+        color: AppColors.getCardBackground(isDark),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+      ),
+      child: Column(
+        children: [
+          // Handle
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.getBorder(isDark),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+
+          // Header avec image
+          Container(
+            height: 200,
+            margin: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.getShadow(isDark),
+                  blurRadius: 15,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: cart['image'] != null
+                      ? Image.network(
+                          cart['image'],
+                          width: double.infinity,
+                          height: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              color: AppColors.primary.withOpacity(0.1),
+                              child: const Icon(
+                                Icons.shopping_basket,
+                                color: AppColors.primary,
+                                size: 80,
+                              ),
+                            );
+                          },
+                        )
+                      : Container(
+                          color: AppColors.primary.withOpacity(0.1),
+                          child: const Icon(
+                            Icons.shopping_basket,
+                            color: AppColors.primary,
+                            size: 80,
+                          ),
+                        ),
+                ),
+
+                // Overlay avec informations
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withOpacity(0.7),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                Positioned(
+                  left: 20,
+                  right: 20,
+                  bottom: 20,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              cart['category'] ?? 'Panier',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          if (cart['is_featured'] == true) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: AppColors.secondary,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Vedette',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        cart['name'] ?? 'Panier',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        CurrencyUtils.formatPrice(
+                            cart['total_price']?.toDouble() ?? 0.0),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Contenu
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Description
+                  Text(
+                    'Description',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.getTextPrimary(isDark),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    cart['description'] ?? 'Aucune description disponible',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: AppColors.getTextSecondary(isDark),
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Articles inclus
+                  Text(
+                    'Articles inclus (${items.length})',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.getTextPrimary(isDark),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: items.length,
+                      itemBuilder: (context, index) {
+                        final item = items[index];
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.getBackground(isDark),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: AppColors.primary,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item['name'] ?? 'Article',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color:
+                                              AppColors.getTextPrimary(isDark),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      if (item['unit'] != null) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          item['unit'],
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: AppColors.getTextSecondary(
+                                                isDark),
+                                          ),
+                                        ),
+                                      ],
+                                    ]),
+                              ),
+                              Text(
+                                'x${item['quantity'] ?? 1}',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.getTextSecondary(isDark),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Boutons d'action
+          Container(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      side: BorderSide(color: AppColors.getBorder(isDark)),
+                    ),
+                    child: Text(
+                      'Fermer',
+                      style: TextStyle(color: AppColors.getTextPrimary(isDark)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: onAddToCart,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Ajouter au panier',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

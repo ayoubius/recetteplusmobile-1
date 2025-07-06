@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/services/cart_service.dart';
 import '../../../../core/utils/currency_utils.dart';
+import '../../../../core/services/supabase_service.dart';
 
 class PreconfiguredCartsPage extends StatefulWidget {
   const PreconfiguredCartsPage({super.key});
@@ -11,7 +12,8 @@ class PreconfiguredCartsPage extends StatefulWidget {
   State<PreconfiguredCartsPage> createState() => _PreconfiguredCartsPageState();
 }
 
-class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with TickerProviderStateMixin {
+class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage>
+    with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   List<Map<String, dynamic>> _allCarts = [];
   List<Map<String, dynamic>> _filteredCarts = [];
@@ -21,6 +23,8 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
   String _selectedCategory = 'Tous';
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
+
+  String? _addingCartId;
 
   final List<String> _categories = [
     'Tous',
@@ -63,10 +67,27 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
     try {
       // Charger tous les paniers préconfigurés (pas seulement ceux en vedette)
       final carts = await CartService.getFeaturedPreconfiguredCarts();
-      
-      _allCarts = carts;
+      // Pour chaque panier, charger les items réels et enrichir chaque item avec les infos produit
+      final cartsWithItems = await Future.wait(carts.map((cart) async {
+        final items = await CartService.getPreconfiguredCartItems(cart['id']);
+        // Enrichir chaque item avec les infos produit
+        final enrichedItems = await Future.wait(items.map((item) async {
+          final productId = item['productId'] ?? item['product_id'];
+          if (productId == null) return item;
+          final product = await SupabaseService.getProductById(productId);
+          return {
+            ...item,
+            ...?product, // Ajoute name, unit, image, etc. si trouvé
+          };
+        }));
+        return {
+          ...cart,
+          'items_count': enrichedItems.length,
+          'items': enrichedItems,
+        };
+      }));
+      _allCarts = cartsWithItems;
       _filterCarts();
-      
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -86,20 +107,22 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
 
   void _filterCarts() {
     _filteredCarts = _allCarts.where((cart) {
-      final matchesCategory = _selectedCategory == 'Tous' || 
-                             cart['category'] == _selectedCategory;
+      final matchesCategory =
+          _selectedCategory == 'Tous' || cart['category'] == _selectedCategory;
       final matchesSearch = _searchController.text.isEmpty ||
-                           cart['name']
-                               .toLowerCase()
-                               .contains(_searchController.text.toLowerCase());
+          cart['name']
+              .toLowerCase()
+              .contains(_searchController.text.toLowerCase());
       return matchesCategory && matchesSearch;
     }).toList();
   }
 
   Future<void> _addToCart(Map<String, dynamic> cart) async {
+    setState(() {
+      _addingCartId = cart['id'];
+    });
     try {
       await CartService.addPreconfiguredCartToUser(cart['id']);
-      
       if (mounted) {
         HapticFeedback.lightImpact();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -127,24 +150,35 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
           ),
         );
       }
+    } finally {
+      if (mounted)
+        setState(() {
+          _addingCartId = null;
+        });
     }
   }
 
   void _viewCartDetails(Map<String, dynamic> cart) {
     HapticFeedback.mediumImpact();
-    
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _buildCartDetailsModal(cart),
+      builder: (context) => PreconfiguredCartDetailsDrawer(
+        cart: cart,
+        onAddToCart: () async {
+          Navigator.pop(context);
+          await _addToCart(cart);
+        },
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       backgroundColor: AppColors.getBackground(isDark),
       appBar: AppBar(
@@ -244,7 +278,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                   ],
                 ),
                 const SizedBox(height: 16),
-                
+
                 // Barre de recherche
                 Container(
                   decoration: BoxDecoration(
@@ -265,11 +299,14 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                     style: TextStyle(color: AppColors.getTextPrimary(isDark)),
                     decoration: InputDecoration(
                       hintText: 'Rechercher un panier...',
-                      hintStyle: TextStyle(color: AppColors.getTextSecondary(isDark)),
-                      prefixIcon: Icon(Icons.search, color: AppColors.getTextSecondary(isDark)),
+                      hintStyle:
+                          TextStyle(color: AppColors.getTextSecondary(isDark)),
+                      prefixIcon: Icon(Icons.search,
+                          color: AppColors.getTextSecondary(isDark)),
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
-                              icon: Icon(Icons.clear, color: AppColors.getTextSecondary(isDark)),
+                              icon: Icon(Icons.clear,
+                                  color: AppColors.getTextSecondary(isDark)),
                               onPressed: () {
                                 _searchController.clear();
                                 setState(() {
@@ -279,14 +316,15 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                             )
                           : null,
                       border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 16),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          
+
           // Filtres par catégorie
           Container(
             height: 70,
@@ -306,10 +344,10 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
               itemBuilder: (context, index) {
                 final category = _categories[index];
                 final isSelected = category == _selectedCategory;
-                final categoryCount = category == 'Tous' 
-                    ? _allCarts.length 
+                final categoryCount = category == 'Tous'
+                    ? _allCarts.length
                     : _allCarts.where((c) => c['category'] == category).length;
-                
+
                 return Container(
                   margin: const EdgeInsets.only(right: 12),
                   child: FilterChip(
@@ -320,10 +358,11 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                         if (categoryCount > 0) ...[
                           const SizedBox(width: 6),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: isSelected 
-                                  ? AppColors.primary 
+                              color: isSelected
+                                  ? AppColors.primary
                                   : AppColors.getTextSecondary(isDark),
                               borderRadius: BorderRadius.circular(10),
                             ),
@@ -349,11 +388,16 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                     backgroundColor: AppColors.getBackground(isDark),
                     selectedColor: AppColors.primary.withOpacity(0.2),
                     labelStyle: TextStyle(
-                      color: isSelected ? AppColors.primary : AppColors.getTextSecondary(isDark),
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                      color: isSelected
+                          ? AppColors.primary
+                          : AppColors.getTextSecondary(isDark),
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.normal,
                     ),
                     side: BorderSide(
-                      color: isSelected ? AppColors.primary : AppColors.getBorder(isDark),
+                      color: isSelected
+                          ? AppColors.primary
+                          : AppColors.getBorder(isDark),
                       width: isSelected ? 2 : 1,
                     ),
                   ),
@@ -361,7 +405,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
               },
             ),
           ),
-          
+
           // Liste des paniers
           Expanded(
             child: _isLoading
@@ -421,8 +465,8 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
             child: Text(
-              _errorMessage.isNotEmpty 
-                  ? _errorMessage 
+              _errorMessage.isNotEmpty
+                  ? _errorMessage
                   : 'Impossible de charger les paniers. Veuillez vérifier votre connexion.',
               style: TextStyle(
                 fontSize: 16,
@@ -512,6 +556,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
   }
 
   Widget _buildCartCard(Map<String, dynamic> cart, bool isDark) {
+    final isAdding = _addingCartId == cart['id'];
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -561,9 +606,9 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                         size: 40,
                       ),
               ),
-              
+
               const SizedBox(width: 16),
-              
+
               // Informations du panier
               Expanded(
                 child: Column(
@@ -585,7 +630,8 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                         ),
                         if (cart['is_featured'] == true)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
                               color: AppColors.primary,
                               borderRadius: BorderRadius.circular(8),
@@ -615,7 +661,8 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: AppColors.primary.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(8),
@@ -641,7 +688,8 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      CurrencyUtils.formatPrice(cart['total_price']?.toDouble() ?? 0.0),
+                      CurrencyUtils.formatPrice(
+                          cart['total_price']?.toDouble() ?? 0.0),
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -651,15 +699,17 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                   ],
                 ),
               ),
-              
+
               // Bouton d'ajout
               GestureDetector(
-                onTap: () => _addToCart(cart),
+                onTap: isAdding ? null : () => _addToCart(cart),
                 child: Container(
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
+                    color: isAdding
+                        ? AppColors.getTextSecondary(isDark)
+                        : AppColors.primary,
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
                       BoxShadow(
@@ -669,11 +719,22 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                       ),
                     ],
                   ),
-                  child: const Icon(
-                    Icons.add_shopping_cart,
-                    color: Colors.white,
-                    size: 24,
-                  ),
+                  child: isAdding
+                      ? const Center(
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                        )
+                      : const Icon(
+                          Icons.add_shopping_cart,
+                          color: Colors.white,
+                          size: 24,
+                        ),
                 ),
               ),
             ],
@@ -682,10 +743,37 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
       ),
     );
   }
+}
 
-  Widget _buildCartDetailsModal(Map<String, dynamic> cart) {
+class PreconfiguredCartDetailsDrawer extends StatefulWidget {
+  final Map<String, dynamic> cart;
+  final Future<void> Function()? onAddToCart;
+  const PreconfiguredCartDetailsDrawer(
+      {Key? key, required this.cart, this.onAddToCart})
+      : super(key: key);
+
+  @override
+  State<PreconfiguredCartDetailsDrawer> createState() =>
+      _PreconfiguredCartDetailsDrawerState();
+}
+
+class _PreconfiguredCartDetailsDrawerState
+    extends State<PreconfiguredCartDetailsDrawer> {
+  bool _isAdding = false;
+
+  Future<void> _handleAddToCart() async {
+    if (widget.onAddToCart == null) return;
+    setState(() => _isAdding = true);
+    try {
+      await widget.onAddToCart!();
+    } finally {
+      if (mounted) setState(() => _isAdding = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
     return Container(
       height: MediaQuery.of(context).size.height * 0.8,
       decoration: BoxDecoration(
@@ -704,7 +792,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          
+
           // Header avec image
           Container(
             height: 200,
@@ -723,9 +811,9 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(20),
-                  child: cart['image'] != null
+                  child: widget.cart['image'] != null
                       ? Image.network(
-                          cart['image'],
+                          widget.cart['image'],
                           width: double.infinity,
                           height: double.infinity,
                           fit: BoxFit.cover,
@@ -749,7 +837,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                           ),
                         ),
                 ),
-                
+
                 // Overlay avec informations
                 Positioned.fill(
                   child: Container(
@@ -766,7 +854,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                     ),
                   ),
                 ),
-                
+
                 Positioned(
                   left: 20,
                   right: 20,
@@ -777,13 +865,14 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                       Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
                               color: AppColors.primary,
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
-                              cart['category'] ?? 'Panier',
+                              widget.cart['category'] ?? 'Panier',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 12,
@@ -791,10 +880,11 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                               ),
                             ),
                           ),
-                          if (cart['is_featured'] == true) ...[
+                          if (widget.cart['is_featured'] == true) ...[
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
                                 color: AppColors.secondary,
                                 borderRadius: BorderRadius.circular(12),
@@ -813,7 +903,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        cart['name'] ?? 'Panier',
+                        widget.cart['name'] ?? 'Panier',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 24,
@@ -822,7 +912,8 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        CurrencyUtils.formatPrice(cart['total_price']?.toDouble() ?? 0.0),
+                        CurrencyUtils.formatPrice(
+                            widget.cart['total_price']?.toDouble() ?? 0.0),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 20,
@@ -835,7 +926,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
               ],
             ),
           ),
-          
+
           // Contenu
           Expanded(
             child: Padding(
@@ -854,7 +945,8 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    cart['description'] ?? 'Aucune description disponible',
+                    widget.cart['description'] ??
+                        'Aucune description disponible',
                     style: TextStyle(
                       fontSize: 16,
                       color: AppColors.getTextSecondary(isDark),
@@ -862,10 +954,10 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                     ),
                   ),
                   const SizedBox(height: 20),
-                  
+
                   // Articles inclus
                   Text(
-                    'Articles inclus (${cart['items_count'] ?? 0})',
+                    'Articles inclus (${widget.cart['items_count'] ?? 0})',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -873,12 +965,12 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                     ),
                   ),
                   const SizedBox(height: 12),
-                  
+
                   Expanded(
                     child: ListView.builder(
-                      itemCount: (cart['items'] as List?)?.length ?? 0,
+                      itemCount: (widget.cart['items'] as List?)?.length ?? 0,
                       itemBuilder: (context, index) {
-                        final item = (cart['items'] as List)[index];
+                        final item = (widget.cart['items'] as List)[index];
                         return Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           padding: const EdgeInsets.all(12),
@@ -898,12 +990,29 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: Text(
-                                  item['name'] ?? 'Article',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: AppColors.getTextPrimary(isDark),
-                                  ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item['name'] ?? 'Article',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: AppColors.getTextPrimary(isDark),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    if (item['unit'] != null) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        item['unit'],
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.getTextSecondary(
+                                              isDark),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                               Text(
@@ -924,7 +1033,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
               ),
             ),
           ),
-          
+
           // Boutons d'action
           Container(
             padding: const EdgeInsets.all(20),
@@ -950,10 +1059,7 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                 Expanded(
                   flex: 2,
                   child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _addToCart(cart);
-                    },
+                    onPressed: _isAdding ? null : _handleAddToCart,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
@@ -962,13 +1068,22 @@ class _PreconfiguredCartsPageState extends State<PreconfiguredCartsPage> with Ti
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text(
-                      'Ajouter au panier',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    child: _isAdding
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text(
+                            'Ajouter au panier',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                   ),
                 ),
               ],

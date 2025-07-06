@@ -43,6 +43,15 @@ class DeliveryService {
         throw Exception('Supabase non initialisé');
       }
 
+      // Obtenir l'utilisateur actuel depuis Supabase
+      final currentUser = SupabaseService.client.auth.currentUser;
+      if (currentUser == null) {
+        throw Exception('Utilisateur non connecté');
+      }
+
+      // Utiliser l'ID de l'utilisateur connecté au lieu de 'current_user_id'
+      final actualUserId = currentUser.id;
+
       // Générer un vrai UUID pour l'ID de commande
       final orderId = _generateUuid();
       final qrCode =
@@ -51,7 +60,7 @@ class DeliveryService {
       // Préparer les données de base pour la commande (seulement les colonnes qui existent)
       final orderData = {
         'id': orderId,
-        'user_id': userId,
+        'user_id': actualUserId, // Utiliser l'ID réel de l'utilisateur
         'total_amount': totalAmount + fixedDeliveryFee,
         'delivery_fee': fixedDeliveryFee,
         'status': 'pending',
@@ -66,7 +75,7 @@ class DeliveryService {
         orderData['delivery_notes'] = deliveryNotes;
       }
 
-      // Ajouter les coordonnées GPS directement dans la table orders si disponibles
+      // Ajouter les coordonnées GPS et autres données si disponibles
       if (additionalData != null) {
         if (additionalData['delivery_latitude'] != null) {
           orderData['delivery_latitude'] = additionalData['delivery_latitude'];
@@ -74,6 +83,22 @@ class DeliveryService {
         if (additionalData['delivery_longitude'] != null) {
           orderData['delivery_longitude'] =
               additionalData['delivery_longitude'];
+        }
+
+        // ❌ SUPPRIMÉ: phone_number car la colonne n'existe pas dans la table orders
+        // if (additionalData['phone_number'] != null) {
+        //   orderData['phone_number'] = additionalData['phone_number'];
+        // }
+
+        // Ajouter les détails d'adresse enrichis si les colonnes existent
+        if (additionalData['delivery_city'] != null) {
+          orderData['delivery_city'] = additionalData['delivery_city'];
+        }
+        if (additionalData['delivery_district'] != null) {
+          orderData['delivery_district'] = additionalData['delivery_district'];
+        }
+        if (additionalData['delivery_landmark'] != null) {
+          orderData['delivery_landmark'] = additionalData['delivery_landmark'];
         }
       }
 
@@ -83,7 +108,7 @@ class DeliveryService {
       // Créer l'objet Order pour le retour
       final order = Order(
         id: orderId,
-        userId: userId,
+        userId: actualUserId,
         totalAmount: totalAmount + fixedDeliveryFee,
         deliveryFee: fixedDeliveryFee,
         status: 'pending',
@@ -97,11 +122,21 @@ class DeliveryService {
 
       if (kDebugMode) {
         print('✅ Commande créée avec succès: ${order.id}');
+        print('👤 Utilisateur: $actualUserId');
         print('📍 Adresse de livraison: $deliveryAddress');
         print('💰 Montant total: ${order.totalAmount} FCFA');
         print('🚚 Frais de livraison: $fixedDeliveryFee FCFA');
         print('📦 Nombre d\'articles: ${items.length}');
-        print('⏰ Livraison estimée: ${order.estimatedDeliveryTime}');
+
+        if (additionalData?['delivery_city'] != null) {
+          print('🏙️ Ville: ${additionalData!['delivery_city']}');
+        }
+        if (additionalData?['delivery_district'] != null) {
+          print('🏘️ Quartier: ${additionalData!['delivery_district']}');
+        }
+        if (additionalData?['phone_number'] != null) {
+          print('📞 Téléphone: ${additionalData!['phone_number']}');
+        }
       }
 
       return order;

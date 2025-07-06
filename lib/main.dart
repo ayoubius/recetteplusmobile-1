@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:recette_plus/features/videos/presentation/pages/videos_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/foundation.dart';
@@ -8,11 +9,13 @@ import 'features/recipes/presentation/pages/recipes_page.dart';
 import 'features/products/presentation/pages/products_page.dart';
 import 'features/profile/presentation/pages/profile_page.dart';
 import 'features/cart/presentation/pages/cart_page.dart';
-import 'features/videos/presentation/pages/videos_page.dart';
 import 'core/constants/app_colors.dart';
 import 'core/services/theme_service.dart';
 import 'core/services/video_lifecycle_manager.dart';
 import 'core/services/enhanced_simple_video_manager.dart';
+import 'core/services/connectivity_service.dart';
+import 'core/services/enhanced_video_service.dart';
+import 'shared/widgets/connectivity_wrapper.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,17 +25,20 @@ void main() async {
       debugPrint('🚀 Démarrage de l\'application...');
     }
 
-    // Initialiser le gestionnaire de cycle de vie des vidéos
+    // Initialize video lifecycle manager
     VideoLifecycleManager().initialize();
-    
-    // Configurer le gestionnaire de vidéos amélioré avec lecture automatique activée
+
+    // Configure enhanced video manager
     EnhancedSimpleVideoManager().configure(
-      autoResumeOnPageReturn: true, // Activé pour la reprise automatique
-      autoPlayOnAppStart: true, // Activé pour le démarrage automatique
+      autoResumeOnPageReturn: true,
+      autoPlayOnAppStart: true,
       preloadDistance: const Duration(seconds: 3),
     );
 
-    // Charger les variables d'environnement depuis le fichier .env
+    // Initialize enhanced video service
+    EnhancedVideoService.initializeAdaptiveQuality();
+
+    // Load environment variables
     String? envContent;
     try {
       envContent = await rootBundle.loadString('.env');
@@ -45,7 +51,7 @@ void main() async {
       }
     }
 
-    // Parser les variables d'environnement
+    // Parse environment variables
     String supabaseUrl = 'https://your-project.supabase.co';
     String supabaseAnonKey = 'your-anon-key';
 
@@ -75,16 +81,7 @@ void main() async {
           '🔑 Anon Key: ${supabaseAnonKey.length > 20 ? '${supabaseAnonKey.substring(0, 20)}...' : 'Non définie'}');
     }
 
-    // Vérifier si les variables sont correctement définies
-    if (supabaseUrl == 'https://your-project.supabase.co' ||
-        supabaseAnonKey == 'your-anon-key') {
-      if (kDebugMode) {
-        debugPrint('⚠️  Variables d\'environnement par défaut détectées');
-        debugPrint('💡 Vérifiez votre fichier .env');
-      }
-    }
-
-    // Initialiser Supabase avec gestion d'erreur
+    // Initialize Supabase
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
@@ -98,7 +95,6 @@ void main() async {
     if (kDebugMode) {
       debugPrint('❌ Erreur d\'initialisation Supabase: $e');
     }
-    // Continuer même en cas d'erreur pour permettre le debug
   }
 
   runApp(const RecettePlusApp());
@@ -109,8 +105,15 @@ class RecettePlusApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => ThemeService()..loadTheme(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (context) => ThemeService()..loadTheme(),
+        ),
+        ChangeNotifierProvider(
+          create: (context) => ConnectivityService()..initialize(),
+        ),
+      ],
       child: Consumer<ThemeService>(
         builder: (context, themeService, child) {
           return MaterialApp(
@@ -124,6 +127,7 @@ class RecettePlusApp extends StatelessWidget {
                   const MainNavigationPage(initialIndex: 1),
               '/welcome': (context) => const WelcomePage(),
               '/main': (context) => const MainNavigationPage(),
+              '/cart': (context) => const MainNavigationPage(initialIndex: 3),
             },
             debugShowCheckedModeBanner: false,
           );
@@ -196,8 +200,7 @@ class RecettePlusApp extends StatelessWidget {
         ),
         systemOverlayStyle: SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
-          statusBarIconBrightness:
-              Brightness.light, // Icônes claires en mode sombre
+          statusBarIconBrightness: Brightness.light,
           statusBarBrightness: Brightness.dark,
         ),
       ),
@@ -228,9 +231,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   Future<void> _checkInitialization() async {
     try {
-      // Attendre un peu pour s'assurer que Supabase est initialisé
       await Future.delayed(const Duration(milliseconds: 500));
-
       setState(() {
         _isInitialized = true;
       });
@@ -239,7 +240,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         debugPrint('⚠️  Erreur de connexion Supabase: $e');
       }
       setState(() {
-        _isInitialized = true; // Continuer même avec erreur
+        _isInitialized = true;
       });
     }
   }
@@ -255,7 +256,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Logo de l'application
               Container(
                 width: 120,
                 height: 120,
@@ -287,117 +287,112 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
-    // Écouter les changements d'authentification avec gestion d'erreur améliorée
-    return StreamBuilder<AuthState>(
-      stream: Supabase.instance.client.auth.onAuthStateChange,
-      builder: (context, snapshot) {
-        // Gestion des erreurs de connexion
-        if (snapshot.hasError) {
+    return ConnectivityWrapper(
+      blockAppWhenOffline: true,
+      child: StreamBuilder<AuthState>(
+        stream: Supabase.instance.client.auth.onAuthStateChange,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            if (kDebugMode) {
+              debugPrint('❌ Erreur AuthState: ${snapshot.error}');
+            }
+            return Scaffold(
+              backgroundColor: AppColors.getBackground(isDark),
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      size: 80,
+                      color: AppColors.error,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Erreur de connexion',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.getTextPrimary(isDark),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Vérifiez votre connexion internet',
+                      style: TextStyle(
+                        color: AppColors.getTextSecondary(isDark),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _isInitialized = false;
+                        });
+                        _checkInitialization();
+                      },
+                      child: const Text('Réessayer'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Scaffold(
+              backgroundColor: AppColors.getBackground(isDark),
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(AppColors.primary),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Vérification de l\'authentification...',
+                      style: TextStyle(
+                        color: AppColors.getTextSecondary(isDark),
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          final session = snapshot.hasData ? snapshot.data!.session : null;
+          final isAuthenticated = session != null;
+
           if (kDebugMode) {
-            debugPrint('❌ Erreur AuthState: ${snapshot.error}');
+            debugPrint(
+                '🔐 État d\'authentification: ${isAuthenticated ? 'Connecté' : 'Déconnecté'}');
+            if (isAuthenticated) {
+              debugPrint('👤 Utilisateur: ${session.user.email}');
+            }
           }
-          return Scaffold(
-            backgroundColor: AppColors.getBackground(isDark),
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    size: 80,
-                    color: AppColors.error,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Erreur de connexion',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.getTextPrimary(isDark),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Vérifiez votre connexion internet',
-                    style: TextStyle(
-                      color: AppColors.getTextSecondary(isDark),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _isInitialized = false;
-                      });
-                      _checkInitialization();
-                    },
-                    child: const Text('Réessayer'),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
 
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Scaffold(
-            backgroundColor: AppColors.getBackground(isDark),
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const CircularProgressIndicator(
-                    valueColor:
-                        AlwaysStoppedAnimation<Color>(AppColors.primary),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Vérification de l\'authentification...',
-                    style: TextStyle(
-                      color: AppColors.getTextSecondary(isDark),
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        // Vérifier l'état d'authentification
-        final session = snapshot.hasData ? snapshot.data!.session : null;
-        final isAuthenticated = session != null;
-
-        if (kDebugMode) {
-          debugPrint(
-              '🔐 État d\'authentification: ${isAuthenticated ? 'Connecté' : 'Déconnecté'}');
           if (isAuthenticated) {
-            debugPrint('👤 Utilisateur: ${session.user.email}');
-          }
-        }
+            Future.microtask(() {
+              Navigator.of(context)
+                  .pushNamedAndRemoveUntil('/main', (route) => false);
+            });
 
-        // Navigation basée sur l'état d'authentification
-        if (isAuthenticated) {
-          // Utilisateur connecté -> Aller à l'application principale
-          // Utiliser Future.microtask pour éviter les problèmes de navigation pendant le build
-          Future.microtask(() {
-            Navigator.of(context)
-                .pushNamedAndRemoveUntil('/main', (route) => false);
-          });
-
-          // Retourner un écran de chargement pendant la navigation
-          return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+            return const Scaffold(
+              body: Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+                ),
               ),
-            ),
-          );
-        } else {
-          // Utilisateur non connecté -> Aller à la page de bienvenue
-          return const WelcomePage();
-        }
-      },
+            );
+          } else {
+            return const WelcomePage();
+          }
+        },
+      ),
     );
   }
 }
@@ -407,7 +402,7 @@ class MainNavigationPage extends StatefulWidget {
 
   const MainNavigationPage({
     super.key,
-    this.initialIndex = 2, // Commencer par la page vidéos (index 2) par défaut
+    this.initialIndex = 2, // Start with videos page by default
   });
 
   @override
@@ -420,10 +415,9 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
   final VideoLifecycleManager _lifecycleManager = VideoLifecycleManager();
   final EnhancedSimpleVideoManager _videoManager = EnhancedSimpleVideoManager();
 
-  // Noms des pages pour le tracking
   final List<String> _pageNames = [
     'recipes',
-    'products', 
+    'products',
     'videos',
     'cart',
     'profile',
@@ -434,25 +428,22 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     super.initState();
     _selectedIndex = widget.initialIndex;
 
-    // Initialiser les pages
     _pages = [
       const RecipesPage(),
       const ProductsPage(),
-      const VideosPage(),
+      const VideosPage(), // Use enhanced TikTok-style video page
       const CartPage(),
       const ProfilePage(),
     ];
 
-    // Définir la page initiale
     _videoManager.setCurrentPage(_pageNames[_selectedIndex]);
 
-    // Si on démarre sur la page vidéos, déclencher la lecture automatique
     if (_selectedIndex == 2) {
       Future.delayed(const Duration(milliseconds: 1500), () {
         if (mounted) {
           _videoManager.forceResumePlayback();
           if (kDebugMode) {
-            print('🚀 Démarrage automatique des vidéos au lancement de l\'app');
+            print('🚀 Auto-start videos on app launch');
           }
         }
       });
@@ -461,7 +452,6 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
 
   @override
   void dispose() {
-    // Nettoyer les gestionnaires
     _lifecycleManager.dispose();
     _videoManager.disposeAll();
     super.dispose();
@@ -473,26 +463,20 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     final previousPageName = _pageNames[_selectedIndex];
     final newPageName = _pageNames[index];
 
-    // FORCER LA PAUSE DE TOUTES LES VIDÉOS IMMÉDIATEMENT
     _videoManager.pauseAll();
-    
-    // Notifier le changement de page au gestionnaire de cycle de vie
     _lifecycleManager.onPageChanged(previousPageName, newPageName);
-    
-    // Mettre à jour la page actuelle dans le gestionnaire de vidéos
     _videoManager.setCurrentPage(newPageName);
 
     setState(() {
       _selectedIndex = index;
     });
 
-    // Si on navigue vers la page vidéos, reprendre la lecture automatiquement
     if (index == 2) {
       Future.delayed(const Duration(milliseconds: 800), () {
         if (mounted) {
           _videoManager.forceResumePlayback();
           if (kDebugMode) {
-            print('🔄 Retour sur la page vidéos - Reprise automatique');
+            print('🔄 Return to videos page - Auto resume');
           }
         }
       });
@@ -500,7 +484,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
 
     if (kDebugMode) {
       print('🔄 Navigation: $previousPageName -> $newPageName');
-      print('⏸️ PAUSE FORCÉE de toutes les vidéos');
+      print('⏸️ FORCED PAUSE of all videos');
     }
   }
 
@@ -508,7 +492,6 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Mettre à jour la barre de statut selon le thème
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
@@ -526,11 +509,10 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
 
     return WillPopScope(
       onWillPop: () async {
-        // Mettre en pause toutes les vidéos lors de la sortie de l'app
         _videoManager.pauseAll();
         _lifecycleManager.pauseAllVideos();
         if (kDebugMode) {
-          print('🚪 Sortie de l\'app - PAUSE FORCÉE de toutes les vidéos');
+          print('🚪 App exit - FORCED PAUSE of all videos');
         }
         return true;
       },
