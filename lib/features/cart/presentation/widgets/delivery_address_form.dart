@@ -26,23 +26,49 @@ class DeliveryAddressForm extends StatefulWidget {
   State<DeliveryAddressForm> createState() => DeliveryAddressFormState();
 }
 
-class DeliveryAddressFormState extends State<DeliveryAddressForm> {
-  final TextEditingController _cityController = TextEditingController();
-  final TextEditingController _districtController = TextEditingController();
-  final TextEditingController _landmarkController = TextEditingController();
+class DeliveryAddressFormState extends State<DeliveryAddressForm>
+    with TickerProviderStateMixin {
+  double? _latitude;
+  double? _longitude;
+  String? _googleMapsLink;
+  bool _isLoadingLocation = false;
+  String _loadingMessage = 'Détection en cours...';
 
-  AddressInfo? _detectedAddressInfo;
-  bool _showDetailedFields = false;
+  // Animation controller pour l'indicateur de chargement
+  late AnimationController _loadingController;
+  late Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupAnimations();
+  }
 
   @override
   void dispose() {
-    _cityController.dispose();
-    _districtController.dispose();
-    _landmarkController.dispose();
+    _loadingController.dispose();
     super.dispose();
   }
 
+  void _setupAnimations() {
+    _loadingController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+
+    _pulseAnimation = Tween<double>(begin: 0.6, end: 1.0).animate(
+      CurvedAnimation(parent: _loadingController, curve: Curves.easeInOut),
+    );
+  }
+
   Future<void> _detectLocationWithDetails() async {
+    setState(() {
+      _isLoadingLocation = true;
+      _loadingMessage = 'Vérification des permissions...';
+    });
+
+    _loadingController.repeat(reverse: true);
+
     try {
       // Vérifier et demander les permissions
       final hasPermission =
@@ -53,42 +79,42 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
       }
 
       setState(() {
-        // Déclencher l'animation de détection
+        _loadingMessage = 'Recherche de votre position...';
       });
 
-      // Obtenir la position actuelle
-      final position = await LocationService.getCurrentPosition();
-      if (position == null) {
+      // Obtenir la position actuelle avec détails complets
+      final positionDetails =
+          await LocationService.getCurrentPositionWithDetails();
+      if (positionDetails == null) {
         _showErrorSnackBar('Impossible d\'obtenir votre position');
         return;
       }
 
+      setState(() {
+        _loadingMessage = 'Récupération de l\'adresse...';
+      });
+
+      // Extraire les coordonnées et le lien Google Maps
+      _latitude = positionDetails['latitude'];
+      _longitude = positionDetails['longitude'];
+      _googleMapsLink = positionDetails['google_maps_link'];
+
       // Obtenir les détails d'adresse complets
       final addressInfo =
           await LocationService.getDetailedAddressFromCoordinates(
-        position.latitude,
-        position.longitude,
+        _latitude!,
+        _longitude!,
       );
 
       if (addressInfo != null) {
         setState(() {
-          _detectedAddressInfo = addressInfo;
-          _showDetailedFields = true;
-
           // Remplir les champs avec les informations détectées
           widget.addressController.text = addressInfo.shortAddress;
-          _cityController.text = addressInfo.city ?? 'Bamako';
-          _districtController.text =
-              addressInfo.neighbourhood ?? addressInfo.suburb ?? '';
-
-          // Si on a un point d'intérêt proche, l'utiliser comme repère
-          if (addressInfo.displayName.contains(',')) {
-            final parts = addressInfo.displayName.split(',');
-            if (parts.length > 2) {
-              _landmarkController.text = parts[1].trim();
-            }
-          }
+          _loadingMessage = 'Localisation détectée !';
         });
+
+        // Petit délai pour montrer le message de succès
+        await Future.delayed(const Duration(milliseconds: 500));
 
         HapticFeedback.lightImpact();
         _showSuccessSnackBar('Localisation détectée avec succès');
@@ -97,10 +123,21 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
       }
     } catch (e) {
       _showErrorSnackBar('Erreur lors de la détection: $e');
+    } finally {
+      _loadingController.stop();
+      setState(() {
+        _isLoadingLocation = false;
+        _loadingMessage = 'Détection en cours...';
+      });
     }
   }
 
   void _showLocationPermissionDialog() {
+    _loadingController.stop();
+    setState(() {
+      _isLoadingLocation = false;
+    });
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -163,13 +200,9 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
       'delivery_address': widget.addressController.text.trim(),
       'delivery_notes': widget.notesController.text.trim(),
       'phone_number': widget.phoneController.text.trim(),
-      'delivery_city': _cityController.text.trim(),
-      'delivery_district': _districtController.text.trim(),
-      'delivery_landmark': _landmarkController.text.trim(),
-      if (_detectedAddressInfo != null) ...{
-        'delivery_latitude': _detectedAddressInfo!.latitude,
-        'delivery_longitude': _detectedAddressInfo!.longitude,
-      },
+      'latitude': _latitude,
+      'longitude': _longitude,
+      'google_maps_link': _googleMapsLink,
     };
   }
 
@@ -222,28 +255,36 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
 
           const SizedBox(height: 20),
 
-          // Location detection button
+          // Location detection button with enhanced loading
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: widget.isDetectingLocation
+              onPressed: (_isLoadingLocation || widget.isDetectingLocation)
                   ? null
                   : _detectLocationWithDetails,
-              icon: widget.isDetectingLocation
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(AppColors.secondary),
-                      ),
+              icon: (_isLoadingLocation || widget.isDetectingLocation)
+                  ? AnimatedBuilder(
+                      animation: _pulseAnimation,
+                      builder: (context, child) {
+                        return Transform.scale(
+                          scale: _pulseAnimation.value,
+                          child: const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  AppColors.secondary),
+                            ),
+                          ),
+                        );
+                      },
                     )
                   : const Icon(Icons.my_location),
               label: Text(
-                widget.isDetectingLocation
-                    ? 'Détection en cours...'
-                    : 'Détecter ma position',
+                (_isLoadingLocation || widget.isDetectingLocation)
+                    ? _loadingMessage
+                    : 'Détecter ma position GPS',
               ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.secondary,
@@ -256,7 +297,74 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
             ),
           ),
 
-          if (_detectedAddressInfo != null) ...[
+          // Enhanced loading indicator
+          if (_isLoadingLocation || widget.isDetectingLocation) ...[
+            const SizedBox(height: 16),
+            AnimatedBuilder(
+              animation: _pulseAnimation,
+              builder: (context, child) {
+                return Opacity(
+                  opacity: _pulseAnimation.value,
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.secondary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.secondary.withOpacity(0.3),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: const AlwaysStoppedAnimation<Color>(
+                                    AppColors.secondary),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                _loadingMessage,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: AppColors.secondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        LinearProgressIndicator(
+                          backgroundColor: AppColors.secondary.withOpacity(0.2),
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                              AppColors.secondary),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Veuillez patienter pendant que nous localisons votre position...',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.getTextSecondary(isDark),
+                            fontStyle: FontStyle.italic,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+
+          if (_latitude != null && _longitude != null) ...[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -279,7 +387,7 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
                       ),
                       const SizedBox(width: 8),
                       const Text(
-                        'Position détectée',
+                        'Position GPS détectée avec succès',
                         style: TextStyle(
                           fontSize: 14,
                           color: AppColors.success,
@@ -290,22 +398,43 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _detectedAddressInfo!.shortAddress,
+                    'Latitude: ${_latitude!.toStringAsFixed(6)}',
                     style: const TextStyle(
                       fontSize: 12,
                       color: AppColors.success,
                     ),
                   ),
-                  if (_detectedAddressInfo!.city != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Ville: ${_detectedAddressInfo!.city}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.success,
-                      ),
+                  Text(
+                    'Longitude: ${_longitude!.toStringAsFixed(6)}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.success,
                     ),
-                  ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.success,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.gps_fixed, color: Colors.white, size: 12),
+                        SizedBox(width: 4),
+                        Text(
+                          'Localisation enregistrée',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -344,46 +473,6 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
 
           const SizedBox(height: 16),
 
-          // City field
-          TextFormField(
-            controller: _cityController,
-            decoration: InputDecoration(
-              labelText: 'Ville *',
-              hintText: 'Ex: Bamako',
-              prefixIcon: const Icon(Icons.location_city),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: AppColors.getBackground(isDark),
-            ),
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'La ville est requise';
-              }
-              return null;
-            },
-          ),
-
-          const SizedBox(height: 16),
-
-          // District/Neighborhood field
-          TextFormField(
-            controller: _districtController,
-            decoration: InputDecoration(
-              labelText: 'Quartier/Commune',
-              hintText: 'Ex: Hamdallaye, Badalabougou...',
-              prefixIcon: const Icon(Icons.location_on),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: AppColors.getBackground(isDark),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
           // Address field
           TextFormField(
             controller: widget.addressController,
@@ -411,23 +500,6 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
 
           const SizedBox(height: 16),
 
-          // Landmark field
-          TextFormField(
-            controller: _landmarkController,
-            decoration: InputDecoration(
-              labelText: 'Point de repère',
-              hintText: 'Ex: Près de la pharmacie, face à l\'école...',
-              prefixIcon: const Icon(Icons.place),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: AppColors.getBackground(isDark),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
           // Notes field
           TextFormField(
             controller: widget.notesController,
@@ -446,7 +518,60 @@ class DeliveryAddressFormState extends State<DeliveryAddressForm> {
 
           const SizedBox(height: 16),
 
-          // Delivery info
+          // Location summary (sans le lien Google Maps visible)
+          if (_latitude != null &&
+              _longitude != null &&
+              _googleMapsLink != null)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.primary.withOpacity(0.2),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(
+                        Icons.map,
+                        color: AppColors.primary,
+                        size: 20,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Informations de localisation',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Coordonnées GPS: ${_latitude!.toStringAsFixed(6)}, ${_longitude!.toStringAsFixed(6)}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.getTextSecondary(isDark),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Localisation enregistrée pour la livraison',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.getTextSecondary(isDark),
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

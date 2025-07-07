@@ -39,10 +39,11 @@ class _OrderPageState extends State<OrderPage> with TickerProviderStateMixin {
   double _deliveryFee = 1000.0;
   double _total = 0.0;
 
-  // Location data
+  // Location data with Google Maps integration (selon db.json)
   double? _latitude;
   double? _longitude;
   String? _detectedAddress;
+  String? _googleMapsLink;
 
   // Reference to the delivery address form for getting enriched data
   final GlobalKey<DeliveryAddressFormState> _deliveryFormKey =
@@ -146,17 +147,19 @@ class _OrderPageState extends State<OrderPage> with TickerProviderStateMixin {
         return;
       }
 
-      // Get current position
-      final position = await LocationService.getCurrentPosition();
+      // Get current position with complete details including Google Maps link
+      final positionDetails =
+          await LocationService.getCurrentPositionWithDetails();
 
-      if (position != null) {
-        _latitude = position.latitude;
-        _longitude = position.longitude;
+      if (positionDetails != null) {
+        _latitude = positionDetails['latitude'];
+        _longitude = positionDetails['longitude'];
+        _googleMapsLink = positionDetails['google_maps_link'];
 
         // Get address from coordinates
         final address = await LocationService.getAddressFromCoordinates(
-          position.latitude,
-          position.longitude,
+          _latitude!,
+          _longitude!,
         );
 
         if (address != null) {
@@ -220,22 +223,27 @@ class _OrderPageState extends State<OrderPage> with TickerProviderStateMixin {
         }
       }
 
-      // Get enriched address data from the form
+      // Get enriched address data from the form (selon db.json structure)
       final enrichedAddressData =
           _deliveryFormKey.currentState?.getEnrichedAddressData() ??
               {
                 'delivery_address': _addressController.text.trim(),
                 'delivery_notes': _notesController.text.trim(),
                 'phone_number': _phoneController.text.trim(),
+                'latitude': _latitude,
+                'longitude': _longitude,
+                'google_maps_link': _googleMapsLink,
               };
 
-      // Add GPS coordinates if available
+      // Ensure we have GPS coordinates and Google Maps link
       if (_latitude != null && _longitude != null) {
-        enrichedAddressData['delivery_latitude'] = _latitude;
-        enrichedAddressData['delivery_longitude'] = _longitude;
+        enrichedAddressData['latitude'] = _latitude;
+        enrichedAddressData['longitude'] = _longitude;
+        enrichedAddressData['google_maps_link'] = _googleMapsLink ??
+            LocationService.generateGoogleMapsLink(_latitude!, _longitude!);
       }
 
-      // Create order with delivery using enriched data
+      // Create order with delivery using enriched data including GPS and Google Maps
       final order = await DeliveryService.createOrderWithDelivery(
         userId:
             'will_be_replaced_with_actual_user_id', // This will be replaced in the service
@@ -255,7 +263,7 @@ class _OrderPageState extends State<OrderPage> with TickerProviderStateMixin {
         HapticFeedback.heavyImpact();
 
         if (mounted) {
-          // Show success dialog
+          // Show success dialog with GPS and Google Maps info
           _showOrderSuccessDialog(order.toJson());
         }
       }
@@ -315,6 +323,44 @@ class _OrderPageState extends State<OrderPage> with TickerProviderStateMixin {
               ),
             ),
             const SizedBox(height: 8),
+            if (_latitude != null && _longitude != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.location_on,
+                            color: AppColors.primary, size: 16),
+                        SizedBox(width: 4),
+                        Text(
+                          'Localisation GPS enregistrée',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Lat: ${_latitude!.toStringAsFixed(4)}, Lon: ${_longitude!.toStringAsFixed(4)}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             Text(
               'Total: ${CurrencyUtils.formatPrice(order['total_amount'])}',
@@ -438,8 +484,8 @@ class _OrderPageState extends State<OrderPage> with TickerProviderStateMixin {
 
                 const SizedBox(height: 24),
 
-                // Delivery Address Section with enhanced form
-                EnhancedDeliveryAddressForm(
+                // Delivery Address Section with enhanced form including GPS and Google Maps
+                DeliveryAddressForm(
                   key: _deliveryFormKey,
                   addressController: _addressController,
                   notesController: _notesController,
@@ -532,418 +578,6 @@ class _OrderPageState extends State<OrderPage> with TickerProviderStateMixin {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// Enhanced delivery address form with better location handling
-class EnhancedDeliveryAddressForm extends StatefulWidget {
-  final TextEditingController addressController;
-  final TextEditingController notesController;
-  final TextEditingController phoneController;
-  final bool isDetectingLocation;
-  final VoidCallback onDetectLocation;
-  final String? detectedAddress;
-
-  const EnhancedDeliveryAddressForm({
-    super.key,
-    required this.addressController,
-    required this.notesController,
-    required this.phoneController,
-    required this.isDetectingLocation,
-    required this.onDetectLocation,
-    this.detectedAddress,
-  });
-
-  @override
-  State<EnhancedDeliveryAddressForm> createState() =>
-      _EnhancedDeliveryAddressFormState();
-}
-
-class _EnhancedDeliveryAddressFormState
-    extends State<EnhancedDeliveryAddressForm> {
-  final TextEditingController _cityController =
-      TextEditingController(text: 'Bamako');
-  final TextEditingController _districtController = TextEditingController();
-  final TextEditingController _landmarkController = TextEditingController();
-
-  double? _latitude;
-  double? _longitude;
-
-  @override
-  void dispose() {
-    _cityController.dispose();
-    _districtController.dispose();
-    _landmarkController.dispose();
-    super.dispose();
-  }
-
-  // Method to get enriched address data
-  Map<String, dynamic> getEnrichedAddressData() {
-    return {
-      'delivery_address': widget.addressController.text.trim(),
-      'delivery_notes': widget.notesController.text.trim(),
-      'phone_number': widget.phoneController.text.trim(),
-      'delivery_city': _cityController.text.trim(),
-      'delivery_district': _districtController.text.trim(),
-      'delivery_landmark': _landmarkController.text.trim(),
-      if (_latitude != null && _longitude != null) ...{
-        'delivery_latitude': _latitude,
-        'delivery_longitude': _longitude,
-      },
-    };
-  }
-
-  Future<void> _detectLocationWithDetails() async {
-    try {
-      // Check permissions
-      final hasPermission =
-          await LocationService.checkAndRequestLocationPermission();
-      if (!hasPermission) {
-        _showPermissionDialog();
-        return;
-      }
-
-      // Get position
-      final position = await LocationService.getCurrentPosition();
-      if (position == null) {
-        _showErrorSnackBar('Impossible d\'obtenir votre position');
-        return;
-      }
-
-      // Get detailed address
-      final addressInfo =
-          await LocationService.getDetailedAddressFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-
-      if (addressInfo != null) {
-        setState(() {
-          _latitude = addressInfo.latitude;
-          _longitude = addressInfo.longitude;
-
-          // Fill form fields
-          widget.addressController.text = addressInfo.shortAddress;
-          _cityController.text = addressInfo.city ?? 'Bamako';
-          _districtController.text =
-              addressInfo.neighbourhood ?? addressInfo.suburb ?? '';
-
-          // Extract landmark from display name if available
-          if (addressInfo.displayName.contains(',')) {
-            final parts = addressInfo.displayName.split(',');
-            if (parts.length > 2) {
-              _landmarkController.text = parts[1].trim();
-            }
-          }
-        });
-
-        _showSuccessSnackBar('Localisation détectée avec succès');
-      }
-    } catch (e) {
-      _showErrorSnackBar('Erreur: $e');
-    }
-  }
-
-  void _showPermissionDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Permission requise'),
-        content: const Text(
-          'L\'accès à votre localisation est nécessaire pour détecter automatiquement votre adresse.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              LocationService.openAppSettings();
-            },
-            child: const Text('Paramètres'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white, size: 20),
-            const SizedBox(width: 8),
-            Text(message),
-          ],
-        ),
-        backgroundColor: AppColors.success,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.error, color: Colors.white, size: 20),
-            const SizedBox(width: 8),
-            Text(message),
-          ],
-        ),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.getCardBackground(isDark),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.getShadow(isDark),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.secondary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.location_on,
-                  color: AppColors.secondary,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Adresse de livraison',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.getTextPrimary(isDark),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
-          // Location detection button
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: widget.isDetectingLocation
-                  ? null
-                  : _detectLocationWithDetails,
-              icon: widget.isDetectingLocation
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(AppColors.secondary),
-                      ),
-                    )
-                  : const Icon(Icons.my_location),
-              label: Text(
-                widget.isDetectingLocation
-                    ? 'Détection en cours...'
-                    : 'Détecter ma position',
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.secondary,
-                side: const BorderSide(color: AppColors.secondary),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-
-          if (_latitude != null && _longitude != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.success.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: AppColors.success.withOpacity(0.3),
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.check_circle,
-                    color: AppColors.success,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Position détectée avec succès',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.success,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          const SizedBox(height: 20),
-
-          // Phone number field
-          TextFormField(
-            controller: widget.phoneController,
-            keyboardType: TextInputType.phone,
-            decoration: InputDecoration(
-              labelText: 'Numéro de téléphone *',
-              hintText: 'Ex: 77123456',
-              prefixIcon: const Icon(Icons.phone),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: AppColors.getBackground(isDark),
-            ),
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'Le numéro de téléphone est requis';
-              }
-              return null;
-            },
-          ),
-
-          const SizedBox(height: 16),
-
-          // City field
-          TextFormField(
-            controller: _cityController,
-            decoration: InputDecoration(
-              labelText: 'Ville *',
-              prefixIcon: const Icon(Icons.location_city),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: AppColors.getBackground(isDark),
-            ),
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'La ville est requise';
-              }
-              return null;
-            },
-          ),
-
-          const SizedBox(height: 16),
-
-          // District field
-          TextFormField(
-            controller: _districtController,
-            decoration: InputDecoration(
-              labelText: 'Quartier/Commune',
-              hintText: 'Ex: Hamdallaye, Badalabougou...',
-              prefixIcon: const Icon(Icons.location_on),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: AppColors.getBackground(isDark),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Address field
-          TextFormField(
-            controller: widget.addressController,
-            maxLines: 2,
-            decoration: InputDecoration(
-              labelText: 'Adresse complète *',
-              hintText: 'Rue, numéro, bâtiment...',
-              prefixIcon: const Icon(Icons.home),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: AppColors.getBackground(isDark),
-            ),
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'L\'adresse est requise';
-              }
-              return null;
-            },
-          ),
-
-          const SizedBox(height: 16),
-
-          // Landmark field
-          TextFormField(
-            controller: _landmarkController,
-            decoration: InputDecoration(
-              labelText: 'Point de repère',
-              hintText: 'Ex: Près de la pharmacie...',
-              prefixIcon: const Icon(Icons.place),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: AppColors.getBackground(isDark),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Notes field
-          TextFormField(
-            controller: widget.notesController,
-            maxLines: 2,
-            decoration: InputDecoration(
-              labelText: 'Instructions de livraison (optionnel)',
-              hintText: 'Ex: Sonner à la porte, 2ème étage...',
-              prefixIcon: const Icon(Icons.note),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: AppColors.getBackground(isDark),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-        ],
       ),
     );
   }

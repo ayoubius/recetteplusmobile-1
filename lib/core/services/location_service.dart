@@ -10,20 +10,25 @@ class Position {
   final double longitude;
   final double? accuracy;
   final DateTime timestamp;
+  final String? googleMapsLink;
 
   Position({
     required this.latitude,
     required this.longitude,
     this.accuracy,
     DateTime? timestamp,
+    this.googleMapsLink,
   }) : timestamp = timestamp ?? DateTime.now();
 
   factory Position.fromGeolocator(geo.Position position) {
+    final googleMapsLink =
+        'https://www.google.com/maps?q=${position.latitude},${position.longitude}';
     return Position(
       latitude: position.latitude,
       longitude: position.longitude,
       accuracy: position.accuracy,
       timestamp: position.timestamp,
+      googleMapsLink: googleMapsLink,
     );
   }
 
@@ -33,7 +38,19 @@ class Position {
       'longitude': longitude,
       'accuracy': accuracy,
       'timestamp': timestamp.toIso8601String(),
+      'google_maps_link': googleMapsLink,
     };
+  }
+
+  /// Générer le lien Google Maps pour cette position
+  String getGoogleMapsLink() {
+    return googleMapsLink ??
+        'https://www.google.com/maps?q=$latitude,$longitude';
+  }
+
+  /// Générer le lien Google Maps avec un label personnalisé
+  String getGoogleMapsLinkWithLabel(String label) {
+    return 'https://www.google.com/maps?q=$latitude,$longitude&label=${Uri.encodeComponent(label)}';
   }
 }
 
@@ -57,8 +74,9 @@ class LocationService {
       }
 
       // Vérifier les permissions
-      geo.LocationPermission permission = await geo.Geolocator.checkPermission();
-      
+      geo.LocationPermission permission =
+          await geo.Geolocator.checkPermission();
+
       if (permission == geo.LocationPermission.denied) {
         permission = await geo.Geolocator.requestPermission();
         if (permission == geo.LocationPermission.denied) {
@@ -101,7 +119,8 @@ class LocationService {
       );
 
       if (kDebugMode) {
-        print('✅ Position obtenue: ${position.latitude}, ${position.longitude}');
+        print(
+            '✅ Position obtenue: ${position.latitude}, ${position.longitude}');
         print('📏 Précision: ${position.accuracy}m');
       }
 
@@ -109,6 +128,33 @@ class LocationService {
     } catch (e) {
       if (kDebugMode) {
         print('❌ Erreur obtention position: $e');
+      }
+      return null;
+    }
+  }
+
+  /// Obtenir la position avec informations complètes pour la livraison
+  static Future<Map<String, dynamic>?> getCurrentPositionWithDetails() async {
+    try {
+      final position = await getCurrentPosition();
+      if (position == null) return null;
+
+      final addressInfo = await getDetailedAddressFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      return {
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'accuracy': position.accuracy,
+        'google_maps_link': position.getGoogleMapsLink(),
+        'address_info': addressInfo?.toJson(),
+        'timestamp': position.timestamp.toIso8601String(),
+      };
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Erreur obtention position avec détails: $e');
       }
       return null;
     }
@@ -203,40 +249,68 @@ class LocationService {
     }
   }
 
+  /// Générer un lien Google Maps à partir de coordonnées
+  static String generateGoogleMapsLink(double latitude, double longitude,
+      {String? label}) {
+    if (label != null && label.isNotEmpty) {
+      return 'https://www.google.com/maps?q=$latitude,$longitude&label=${Uri.encodeComponent(label)}';
+    }
+    return 'https://www.google.com/maps?q=$latitude,$longitude';
+  }
+
+  /// Générer un lien Google Maps pour une adresse
+  static String generateGoogleMapsLinkFromAddress(String address) {
+    return 'https://www.google.com/maps/search/${Uri.encodeComponent(address)}';
+  }
+
+  /// Valider des coordonnées GPS
+  static bool isValidCoordinates(double? latitude, double? longitude) {
+    if (latitude == null || longitude == null) return false;
+    return latitude >= -90 &&
+        latitude <= 90 &&
+        longitude >= -180 &&
+        longitude <= 180;
+  }
+
   /// S'abonner aux mises à jour de position d'une livraison
-  static Stream<Map<String, dynamic>> subscribeToDeliveryUpdates(String orderId) {
+  static Stream<Map<String, dynamic>> subscribeToDeliveryUpdates(
+      String orderId) {
     _locationController ??= StreamController<Map<String, dynamic>>.broadcast();
-    
+
     // Simuler des mises à jour de position toutes les 15 secondes
     Timer.periodic(const Duration(seconds: 15), (timer) {
       if (_locationController?.isClosed == true) {
         timer.cancel();
         return;
       }
-      
+
       final now = DateTime.now();
-      // Coordonnées de base pour Yaoundé, Cameroun
-      final baseLatitude = 3.848;
-      final baseLongitude = 11.502;
-      
+      // Coordonnées de base pour Bamako, Mali
+      final baseLatitude = 12.6392;
+      final baseLongitude = -8.0029;
+
       // Simuler un mouvement réaliste
-      final latitude = baseLatitude + (now.millisecond / 100000) * (now.second % 2 == 0 ? 1 : -1);
-      final longitude = baseLongitude + (now.second / 10000) * (now.minute % 2 == 0 ? 1 : -1);
-      
+      final latitude = baseLatitude +
+          (now.millisecond / 100000) * (now.second % 2 == 0 ? 1 : -1);
+      final longitude =
+          baseLongitude + (now.second / 10000) * (now.minute % 2 == 0 ? 1 : -1);
+
       _locationController?.add({
         'order_id': orderId,
         'latitude': latitude,
         'longitude': longitude,
+        'google_maps_link': generateGoogleMapsLink(latitude, longitude,
+            label: 'Livraison $orderId'),
         'timestamp': now.toIso8601String(),
         'speed': 25.0 + (now.second % 10), // km/h simulée
         'heading': now.second * 6.0, // Direction simulée
       });
-      
+
       if (kDebugMode) {
         print('📍 Position mise à jour pour $orderId: $latitude, $longitude');
       }
     });
-    
+
     return _locationController!.stream;
   }
 
@@ -249,26 +323,27 @@ class LocationService {
   /// Afficher une boîte de dialogue pour les permissions de localisation
   static Future<bool> showLocationPermissionDialog(BuildContext context) async {
     return await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Permission de localisation'),
-          content: const Text(
-            'Cette application a besoin d\'accéder à votre localisation pour vous proposer les meilleures options de livraison et suivre vos commandes en temps réel.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Refuser'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Autoriser'),
-            ),
-          ],
-        );
-      },
-    ) ?? false;
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Permission de localisation'),
+              content: const Text(
+                'Cette application a besoin d\'accéder à votre localisation pour vous proposer les meilleures options de livraison et suivre vos commandes en temps réel.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Refuser'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Autoriser'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
   }
 
   /// Ouvrir les paramètres de l'application
@@ -277,7 +352,7 @@ class LocationService {
       if (kDebugMode) {
         print('⚙️ Ouverture des paramètres de l\'application...');
       }
-      
+
       await geo.Geolocator.openAppSettings();
     } catch (e) {
       if (kDebugMode) {
@@ -288,22 +363,26 @@ class LocationService {
 
   /// Calculer la distance entre deux points
   static double calculateDistance(
-    double lat1, double lon1,
-    double lat2, double lon2,
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
   ) {
     return GeocodingService.calculateDistance(lat1, lon1, lat2, lon2);
   }
 
   /// Calculer le temps estimé de trajet
   static Duration calculateEstimatedTravelTime(
-    double lat1, double lon1,
-    double lat2, double lon2, {
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2, {
     double averageSpeed = 30.0, // km/h
   }) {
     final distance = calculateDistance(lat1, lon1, lat2, lon2);
     final timeInHours = distance / averageSpeed;
     final timeInMinutes = (timeInHours * 60).round();
-    
+
     return Duration(minutes: timeInMinutes);
   }
 
@@ -315,7 +394,8 @@ class LocationService {
     double centerLon,
     double radiusKm,
   ) {
-    final distance = calculateDistance(latitude, longitude, centerLat, centerLon);
+    final distance =
+        calculateDistance(latitude, longitude, centerLat, centerLon);
     return distance <= radiusKm;
   }
 

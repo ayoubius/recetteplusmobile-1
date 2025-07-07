@@ -1,3 +1,4 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:math';
@@ -5,8 +6,8 @@ import 'package:recette_plus/features/delivery/data/models/delivery_person.dart'
 import 'package:recette_plus/features/delivery/data/models/order.dart';
 import 'package:recette_plus/features/delivery/data/models/order_tracking.dart';
 import 'package:recette_plus/features/delivery/data/models/order_status_history.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'supabase_service.dart';
+import 'location_service.dart';
 
 class DeliveryService {
   static StreamController<Map<String, dynamic>>? _trackingController;
@@ -29,7 +30,7 @@ class DeliveryService {
 
   // ==================== CRÉATION DE COMMANDES ====================
 
-  /// Créer une commande avec livraison
+  /// Créer une commande avec livraison incluant GPS et Google Maps
   static Future<Order?> createOrderWithDelivery({
     required String userId,
     required double totalAmount,
@@ -57,10 +58,10 @@ class DeliveryService {
       final qrCode =
           'QR-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
 
-      // Préparer les données de base pour la commande (seulement les colonnes qui existent)
+      // Préparer les données de base pour la commande
       final orderData = {
         'id': orderId,
-        'user_id': actualUserId, // Utiliser l'ID réel de l'utilisateur
+        'user_id': actualUserId,
         'total_amount': totalAmount + fixedDeliveryFee,
         'delivery_fee': fixedDeliveryFee,
         'status': 'pending',
@@ -75,31 +76,32 @@ class DeliveryService {
         orderData['delivery_notes'] = deliveryNotes;
       }
 
-      // Ajouter les coordonnées GPS et autres données si disponibles
+      // Ajouter les coordonnées GPS directement dans la table orders
       if (additionalData != null) {
-        if (additionalData['delivery_latitude'] != null) {
-          orderData['delivery_latitude'] = additionalData['delivery_latitude'];
+        // Coordonnées GPS dans les champs delivery_latitude et delivery_longitude
+        if (additionalData['latitude'] != null) {
+          orderData['delivery_latitude'] = additionalData['latitude'];
         }
-        if (additionalData['delivery_longitude'] != null) {
-          orderData['delivery_longitude'] =
-              additionalData['delivery_longitude'];
+        if (additionalData['longitude'] != null) {
+          orderData['delivery_longitude'] = additionalData['longitude'];
         }
 
-        // ❌ SUPPRIMÉ: phone_number car la colonne n'existe pas dans la table orders
-        // if (additionalData['phone_number'] != null) {
-        //   orderData['phone_number'] = additionalData['phone_number'];
-        // }
+        // Lien Google Maps
+        if (additionalData['google_maps_link'] != null) {
+          orderData['google_maps_link'] = additionalData['google_maps_link'];
+        } else if (additionalData['latitude'] != null &&
+            additionalData['longitude'] != null) {
+          // Générer le lien Google Maps si les coordonnées sont disponibles
+          orderData['google_maps_link'] =
+              LocationService.generateGoogleMapsLink(
+            additionalData['latitude'],
+            additionalData['longitude'],
+            label: 'Livraison #$qrCode',
+          );
+        }
 
-        // Ajouter les détails d'adresse enrichis si les colonnes existent
-        if (additionalData['delivery_city'] != null) {
-          orderData['delivery_city'] = additionalData['delivery_city'];
-        }
-        if (additionalData['delivery_district'] != null) {
-          orderData['delivery_district'] = additionalData['delivery_district'];
-        }
-        if (additionalData['delivery_landmark'] != null) {
-          orderData['delivery_landmark'] = additionalData['delivery_landmark'];
-        }
+        // Note: Le champ phone_number n'existe pas dans la table orders
+        // Le numéro de téléphone sera géré via le profil utilisateur
       }
 
       // Insérer la commande dans la base de données
@@ -128,14 +130,13 @@ class DeliveryService {
         print('🚚 Frais de livraison: $fixedDeliveryFee FCFA');
         print('📦 Nombre d\'articles: ${items.length}');
 
-        if (additionalData?['delivery_city'] != null) {
-          print('🏙️ Ville: ${additionalData!['delivery_city']}');
+        if (additionalData?['latitude'] != null &&
+            additionalData?['longitude'] != null) {
+          print(
+              '🌍 Coordonnées GPS: ${additionalData!['latitude']}, ${additionalData['longitude']}');
         }
-        if (additionalData?['delivery_district'] != null) {
-          print('🏘️ Quartier: ${additionalData!['delivery_district']}');
-        }
-        if (additionalData?['phone_number'] != null) {
-          print('📞 Téléphone: ${additionalData!['phone_number']}');
+        if (additionalData?['google_maps_link'] != null) {
+          print('🗺️ Lien Google Maps: ${additionalData!['google_maps_link']}');
         }
       }
 
@@ -436,11 +437,12 @@ class DeliveryService {
     }
   }
 
-  /// Mettre à jour la position de livraison
+  /// Mettre à jour la position de livraison avec Google Maps
   static Future<bool> updateDeliveryLocation({
     required String trackingId,
     required double latitude,
     required double longitude,
+    String? orderId,
   }) async {
     try {
       if (!SupabaseService.isInitialized) {
@@ -451,14 +453,23 @@ class DeliveryService {
         return false;
       }
 
+      // Générer le lien Google Maps pour la position actuelle
+      final googleMapsLink = LocationService.generateGoogleMapsLink(
+        latitude,
+        longitude,
+        label: orderId != null ? 'Livraison $orderId' : 'Position livreur',
+      );
+
       await SupabaseService.client.from('delivery_tracking').update({
         'current_latitude': latitude,
         'current_longitude': longitude,
+        'google_maps_link': googleMapsLink,
         'last_updated_at': DateTime.now().toIso8601String(),
       }).eq('id', trackingId);
 
       if (kDebugMode) {
         print('📍 Position mise à jour: $trackingId -> $latitude, $longitude');
+        print('🗺️ Lien Google Maps: $googleMapsLink');
       }
 
       return true;
@@ -562,11 +573,21 @@ class DeliveryService {
 
       // Créer un enregistrement de suivi si la table existe
       try {
+        // Position par défaut Bamako, Mali
+        const defaultLatitude = 12.6392;
+        const defaultLongitude = -8.0029;
+        final googleMapsLink = LocationService.generateGoogleMapsLink(
+          defaultLatitude,
+          defaultLongitude,
+          label: 'Livraison $orderId',
+        );
+
         await SupabaseService.client.from('delivery_tracking').insert({
           'order_id': orderId,
           'delivery_person_id': deliveryPersonId,
-          'current_latitude': 12.6392, // Position par défaut Bamako
-          'current_longitude': -8.0029,
+          'current_latitude': defaultLatitude,
+          'current_longitude': defaultLongitude,
+          'google_maps_link': googleMapsLink,
           'last_updated_at': DateTime.now().toIso8601String(),
           'notes': 'Prise en charge par le livreur',
         });
@@ -677,7 +698,7 @@ class DeliveryService {
 
   // ==================== STREAMING ET TEMPS RÉEL ====================
 
-  /// S'abonner aux mises à jour de suivi d'une commande
+  /// S'abonner aux mises à jour de suivi d'une commande avec Google Maps
   static Stream<Map<String, dynamic>> subscribeToOrderTracking(String orderId) {
     _trackingController ??= StreamController<Map<String, dynamic>>.broadcast();
 
@@ -691,16 +712,24 @@ class DeliveryService {
             .listen((data) {
               if (data.isNotEmpty && _trackingController?.isClosed == false) {
                 final tracking = data.first;
+                final latitude = tracking['current_latitude'];
+                final longitude = tracking['current_longitude'];
+
                 _trackingController?.add({
                   'order_id': orderId,
-                  'latitude': tracking['current_latitude'],
-                  'longitude': tracking['current_longitude'],
+                  'latitude': latitude,
+                  'longitude': longitude,
+                  'google_maps_link': tracking['google_maps_link'] ??
+                      LocationService.generateGoogleMapsLink(
+                          latitude, longitude),
                   'timestamp': tracking['last_updated_at'],
                   'status': 'out_for_delivery',
                 });
 
                 if (kDebugMode) {
                   print('📡 Mise à jour position reçue pour commande $orderId');
+                  print(
+                      '🗺️ Lien Google Maps: ${tracking['google_maps_link']}');
                 }
               }
             });
